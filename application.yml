@@ -42,10 +42,17 @@ youtube:
 
 lavasrc:
   providers:
-    - "ytsearch:\"%ISRC%\""
-    - "ytsearch:%QUERY%"
+    - "ytsearch:\"%ISRC%\"" # Sucht erst nach der exakten ID (ISRC)
+    - "ytsearch:%QUERY%"    # Fallback
   sources:
     spotify: true
     applemusic: true
     deezer: false
     yandexmusic: false
+  
+  # NEU: Hier kommen die Spotify-Daten rein
+  spotify:
+    clientId: "${SPOTIFY_CLIENT_ID}"
+    clientSecret: "${SPOTIFY_CLIENT_SECRET}"
+    countryCode: "DE" # Damit Songs verfügbar sind, die es in Deutschland gibt
+    playlistLoadLimit: 6 # Lädt bis zu 6 Seiten einer Playlist (optional)
