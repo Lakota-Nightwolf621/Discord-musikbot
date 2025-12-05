@@ -19,12 +19,11 @@
     .progress-bar { width: 100%; height: 8px; background: #333; border-radius: 4px; margin-top: 10px; overflow: hidden; }
     .progress-fill { height: 100%; background: var(--accent); width: 0%; transition: width 0.5s linear; }
     
-    input, button { padding: 10px; border-radius: 6px; border: none; }
-    input { background: #0f172a; color: white; border: 1px solid #475569; width: 200px; }
-    button { background: var(--accent); color: white; cursor: pointer; font-weight: bold; }
-    button:disabled { opacity: 0.5; }
+    input, button, select { padding: 10px; border-radius: 6px; border: 1px solid #475569; background: #0f172a; color: white; }
+    button { background: var(--accent); border: none; cursor: pointer; font-weight: bold; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
     
-    textarea { width: 100%; height: 300px; background: #000; color: #0f0; border: none; padding: 10px; font-family: monospace; }
+    textarea { width: 100%; height: 200px; background: #000; color: #0f0; border: none; padding: 10px; font-family: monospace; }
   </style>
 </head>
 <body>
@@ -36,130 +35,182 @@
       <input type="password" id="apiKey" placeholder="Passwort" />
       <button onclick="login()">Login</button>
     </div>
-    <div id="statusArea" style="display:none; text-align:right;">
-      <span style="color:#4ade80">● Verbunden</span>
-    </div>
+    <div id="statusArea" style="display:none; color:#4ade80">● Verbunden</div>
   </div>
 
-  <div class="card" id="statsCard" style="display:none;">
-    <h2>System Auslastung</h2>
+  <div class="card" id="mainUI" style="display:none;">
+    <h2>System (Bot Container)</h2>
     <div class="stats-grid">
-      <div class="stat-box">RAM: <div class="stat-val" id="ramVal">-</div></div>
+      <div class="stat-box">Bot RAM: <div class="stat-val" id="ramVal">-</div></div>
       <div class="stat-box">CPU Load: <div class="stat-val" id="cpuVal">-</div></div>
-      <div class="stat-box">Uptime: <div class="stat-val" id="uptimeVal">-</div></div>
+      <div class="stat-box">Bot Uptime: <div class="stat-val" id="uptimeVal">-</div></div>
     </div>
   </div>
 
-  <div class="card" id="playerCard" style="display:none;">
-    <h2>Now Playing (Live)</h2>
+  <div class="card" id="playerUI" style="display:none;">
+    <h2>Now Playing (Echtzeit)</h2>
+    
+    <div style="margin-bottom: 20px; text-align:center;">
+       <label>Aktiver Server:</label>
+       <select id="serverSelect" onchange="changeServer()"></select>
+    </div>
+
     <div class="player-ui">
-      <h3 id="npTitle">Nichts wird abgespielt</h3>
+      <h3 id="npTitle">Wähle einen Server...</h3>
       <div id="npAuthor" style="color:#94a3b8"></div>
-      <div class="progress-bar">
-        <div class="progress-fill" id="progFill"></div>
-      </div>
+      <div class="progress-bar"><div class="progress-fill" id="progFill"></div></div>
       <div style="display:flex; justify-content:space-between; margin-top:5px; font-size:0.8rem;">
-        <span id="currTime">0:00</span>
-        <span id="totTime">0:00</span>
+        <span id="currTime">0:00</span><span id="totTime">0:00</span>
       </div>
-    </div>
-    <div style="margin-top: 20px;">
-        <label>Server ID überwachen:</label>
-        <input type="text" id="guildId" placeholder="Discord Server ID" onchange="startPlayerLoop()">
     </div>
   </div>
 
-  <div class="card" id="logsCard" style="display:none;">
-    <h2>System Logs</h2>
+  <div class="card" id="controlsUI" style="display:none;">
+    <h2>Steuerung</h2>
+    <div style="display:flex; gap:10px; margin-bottom:15px;">
+       <input type="text" id="playUrl" placeholder="YouTube / Spotify Link" style="flex:1;">
+       <button onclick="control('play')">Play</button>
+    </div>
+    <div style="display:flex; gap:10px;">
+       <button onclick="control('skip')" style="background:#3b82f6">Skip</button>
+       <button onclick="control('stop')" style="background:#ef4444">Stop</button>
+    </div>
+    
+    <h3 style="margin-top:20px; border-top:1px solid #333; padding-top:10px;">Einstellungen</h3>
+    <label>Standard Voice Channel:</label>
+    <select id="voiceSelect"></select>
+    <button onclick="saveSettings()" style="margin-top:5px; font-size:0.8rem;">Speichern</button>
+  </div>
+
+  <div class="card" id="logUI" style="display:none;">
+    <h2>Logs</h2>
     <textarea id="logArea" readonly></textarea>
   </div>
 </div>
 
 <script>
 let token = "";
+let currentGid = "";
 let playerInterval = null;
 
 function login() {
   token = document.getElementById('apiKey').value;
-  if(!token) return alert("Passwort fehlt!");
-  
-  // Test Auth
+  if(!token) return alert("PW fehlt");
   fetch('/api/status', { headers: { 'x-api-key': token } })
-    .then(r => {
-      if(r.status === 401) throw new Error("Falsches Passwort");
-      return r.json();
-    })
+    .then(r => { if(r.status===401) throw new Error("Falsches PW"); return r.json(); })
     .then(data => {
-      document.getElementById('loginArea').style.display = 'none';
-      document.getElementById('statusArea').style.display = 'block';
-      document.getElementById('statsCard').style.display = 'block';
-      document.getElementById('playerCard').style.display = 'block';
-      document.getElementById('logsCard').style.display = 'block';
+      document.getElementById('loginArea').style.display='none';
+      document.getElementById('statusArea').style.display='block';
+      ['mainUI','playerUI','controlsUI','logUI'].forEach(id=>document.getElementById(id).style.display='block');
       
       updateStats(data.system);
-      setInterval(loadStats, 5000); // Alle 5s System Stats
-      setInterval(loadLogs, 3000);  // Alle 3s Logs
+      fillServerList(data.guilds);
+      
+      setInterval(loadStats, 5000);
+      setInterval(loadLogs, 3000);
+      startPlayerLoop();
     })
-    .catch(e => alert(e.message));
+    .catch(e=>alert(e.message));
+}
+
+function fillServerList(guilds) {
+  const sel = document.getElementById('serverSelect');
+  sel.innerHTML = '<option value="">-- Wählen --</option>';
+  guilds.forEach(g => {
+    const opt = document.createElement('option');
+    opt.value = g.id; opt.innerText = g.name;
+    sel.appendChild(opt);
+  });
+}
+
+function changeServer() {
+  currentGid = document.getElementById('serverSelect').value;
+  if(!currentGid) return;
+  loadGuildDetails();
+  updatePlayer();
+}
+
+function loadGuildDetails() {
+  fetch(`/api/guilds/${currentGid}/details`, { headers: { 'x-api-key': token } })
+    .then(r=>r.json())
+    .then(d => {
+       const vsel = document.getElementById('voiceSelect');
+       vsel.innerHTML = '';
+       d.voiceChannels.forEach(c => {
+         const opt = document.createElement('option');
+         opt.value = c.id; opt.innerText = c.name;
+         vsel.appendChild(opt);
+       });
+       if(d.settings.voiceChannelId) vsel.value = d.settings.voiceChannelId;
+    });
+}
+
+function control(action) {
+  if(!currentGid) return alert("Erst Server wählen!");
+  
+  if(action === 'play') {
+    const query = document.getElementById('playUrl').value;
+    fetch(`/api/guilds/${currentGid}/play`, {
+       method:'POST', headers:{'x-api-key':token, 'Content-Type':'application/json'},
+       body: JSON.stringify({query})
+    }).then(r=>r.json()).then(d=>{
+       if(d.error) alert(d.error);
+       else { document.getElementById('playUrl').value=''; alert("Gestartet: "+d.track); }
+    });
+  } else {
+    fetch(`/api/guilds/${currentGid}/${action}`, {
+       method:'POST', headers:{'x-api-key':token}
+    });
+  }
+}
+
+function saveSettings() {
+  if(!currentGid) return;
+  const vid = document.getElementById('voiceSelect').value;
+  fetch(`/api/guilds/${currentGid}/settings`, {
+     method:'POST', headers:{'x-api-key':token, 'Content-Type':'application/json'},
+     body: JSON.stringify({ voiceChannelId: vid })
+  }).then(()=>alert("Gespeichert"));
 }
 
 function loadStats() {
-  fetch('/api/status', { headers: { 'x-api-key': token } })
-    .then(r => r.json())
-    .then(d => updateStats(d.system));
+  fetch('/api/status', { headers: { 'x-api-key': token } }).then(r=>r.json()).then(d=>updateStats(d.system));
 }
-
 function updateStats(s) {
-  if(!s) return;
   document.getElementById('ramVal').innerText = s.ramUsed;
   document.getElementById('cpuVal').innerText = s.cpuLoad;
   document.getElementById('uptimeVal').innerText = s.uptime;
 }
-
 function loadLogs() {
-  fetch('/api/logs', { headers: { 'x-api-key': token } })
-    .then(r => r.json())
-    .then(d => {
-       const el = document.getElementById('logArea');
-       el.value = d.lines.join("\n");
-       el.scrollTop = el.scrollHeight;
-    });
+  fetch('/api/logs', { headers: { 'x-api-key': token } }).then(r=>r.json()).then(d=>{
+     const el=document.getElementById('logArea'); el.value=d.lines.join("\n"); el.scrollTop=el.scrollHeight;
+  });
 }
 
-// Echtzeit Player Update (läuft öfter: jede Sekunde)
 function startPlayerLoop() {
   if(playerInterval) clearInterval(playerInterval);
   playerInterval = setInterval(updatePlayer, 1000);
-  updatePlayer();
 }
-
 function updatePlayer() {
-  const gid = document.getElementById('guildId').value;
-  if(!gid) return;
-
-  fetch(`/api/np?guildId=${gid}`)
-    .then(r => r.json())
-    .then(d => {
-      if(!d.playing) {
-        document.getElementById('npTitle').innerText = "Pause / Leer";
-        document.getElementById('progFill').style.width = "0%";
-        return;
-      }
-      document.getElementById('npTitle').innerText = d.title;
-      document.getElementById('npAuthor').innerText = d.author;
-      
-      if(d.duration > 0) {
-        const pct = (d.position / d.duration) * 100;
-        document.getElementById('progFill').style.width = pct + "%";
-        document.getElementById('currTime').innerText = fmt(d.position);
-        document.getElementById('totTime').innerText = fmt(d.duration);
-      }
-    });
+  if(!currentGid) return;
+  fetch(`/api/np?guildId=${currentGid}`).then(r=>r.json()).then(d => {
+    if(!d.playing) {
+       document.getElementById('npTitle').innerText = "Pause / Leer";
+       document.getElementById('progFill').style.width="0%";
+       return;
+    }
+    document.getElementById('npTitle').innerText = d.title;
+    document.getElementById('npAuthor').innerText = d.author;
+    if(d.duration > 0) {
+       const pct = (d.position / d.duration)*100;
+       document.getElementById('progFill').style.width=pct+"%";
+       document.getElementById('currTime').innerText=fmt(d.position);
+       document.getElementById('totTime').innerText=fmt(d.duration);
+    }
+  });
 }
-
 function fmt(ms) {
-  const s = Math.floor(ms / 1000) % 60;
-  const m = Math.floor(ms / 1000 / 60);
+  const s=Math.floor(ms/1000)%60, m=Math.floor(ms/1000/60);
   return `${m}:${s.toString().padStart(2,'0')}`;
 }
 </script>
