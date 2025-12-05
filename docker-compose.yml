@@ -1,23 +1,47 @@
 version: '3.8'
 
 services:
+  # --- Lavalink (Server) ---
+  lavalink:
+    build:
+      context: .
+      dockerfile: Dockerfile.lavalink
+    container_name: lavalink-unified
+    restart: always
+    environment:
+      - _JAVA_OPTIONS=-Xmx2G
+      - SERVER_PORT=2333
+      # Hier holen wir die Werte aus Portainer und geben sie an Lavalink weiter:
+      - LAVALINK_SERVER_PASSWORD=${LAVALINK_SERVER_PASSWORD}
+      - PO_TOKEN=${PO_TOKEN}
+      - PO_VISITOR_DATA=${PO_VISITOR_DATA}
+    volumes:
+      - lavalink-plugins:/opt/Lavalink/plugins
+    expose:
+      - "2333"
+    networks:
+      - musicnet
+
+  # --- Musicbot (Client) ---
   musicbot:
     build: .
-    container_name: musicbot
+    container_name: musicbot-unified
     restart: always
     ports:
       - "8080:8080"
-    # NEU: Netzwerk zuweisen
-    networks:
-      - musicnet
     environment:
       - DISCORD_TOKEN=${DISCORD_TOKEN}
-      # WICHTIG: Im internen Netzwerk nutzen wir den Container-Namen als Host!
-      - LAVALINK_HOST=lavalink-debian
-      - LAVALINK_PORT=${LAVALINK_PORT}
-      - LAVALINK_PASSWORD=${LAVALINK_PASSWORD}
+      - LAVALINK_HOST=lavalink
+      - LAVALINK_PORT=2333
+      - LAVALINK_PASSWORD=${LAVALINK_SERVER_PASSWORD} # Nutzt das gleiche PW wie oben
+    depends_on:
+      - lavalink
+    networks:
+      - musicnet
 
-# NEU: Definition des externen Netzwerks
+volumes:
+  lavalink-plugins:
+
 networks:
   musicnet:
-    external: true
+    driver: bridge
