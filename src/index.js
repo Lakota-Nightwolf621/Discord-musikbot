@@ -247,7 +247,7 @@ client.once("ready", async () => {
   await registerSlashCommands();
 });
 
-// --------- PREFIX COMMANDS ---------
+// --------- PREFIX COMMANDS (Hier war der Fehler!) ---------
 client.on("messageCreate", async (message) => {
   if (message.author.bot || !message.guild) return;
   if (!message.content.startsWith(COMMAND_PREFIX)) return;
@@ -263,7 +263,7 @@ client.on("messageCreate", async (message) => {
   try {
     if (cmd === "play" || cmd === "p") {
       const query = args.join(" ");
-      if (!query) return message.reply("Link/Suche fehlt.");
+      if (!query) return message.reply("Link fehlt.");
       const player = await getPrefixPlayer();
       if(!player) return message.reply("Komm in den Voice!");
       const res = await player.search({ query }, message.author);
@@ -292,6 +292,19 @@ client.on("messageCreate", async (message) => {
        const msg = await message.reply({ embeds: [embed], components: [createPlayerButtons(p.paused)] });
        playerMessages.set(message.guild.id, msg);
     }
+    // HIER SIND DIE FEHLENDEN BEFEHLE:
+    else if (cmd === "about" || cmd === "info") {
+       const stats = getSystemStats();
+       const embed = new EmbedBuilder()
+         .setTitle("🐺 Nightwolf Status")
+         .setColor(0x00ffaa)
+         .addFields(
+           { name: "RAM", value: stats.ramUsed, inline: true },
+           { name: "CPU", value: stats.cpuLoad, inline: true },
+           { name: "Uptime", value: stats.uptime, inline: true }
+         );
+       message.reply({ embeds: [embed] });
+    }
     else if (cmd === "autoplay") {
        const sub = args[0];
        const s = ensureGuildSettings(message.guild.id);
@@ -317,14 +330,13 @@ client.on("messageCreate", async (message) => {
        message.reply("Volume gesetzt.");
     }
     else if (cmd === "help") {
-      message.reply("Befehle: `!play`, `!skip`, `!stop`, `!leave`, `!np`, `!volume`, `!autoplay`");
+      message.reply("Befehle: `!play`, `!skip`, `!stop`, `!leave`, `!np`, `!volume`, `!autoplay`, `!about`");
     }
   } catch (e) { message.reply("Fehler: " + e.message); }
 });
 
-// --------- INTERACTION HANDLER (Buttons & Slash) ---------
+// --------- INTERACTION HANDLER ---------
 client.on("interactionCreate", async (interaction) => {
-  // 1. Buttons
   if (interaction.isButton()) {
     const player = client.lavalink.getPlayer(interaction.guildId);
     if (!player) return interaction.reply({ content: "Kein Player.", ephemeral: true });
@@ -348,7 +360,6 @@ client.on("interactionCreate", async (interaction) => {
     }
   }
 
-  // 2. Slash Commands
   if (interaction.isChatInputCommand()) {
     const cmd = interaction.commandName;
     try {
@@ -419,7 +430,6 @@ client.on("interactionCreate", async (interaction) => {
   }
 });
 
-// --------- SLASH REGISTRATION (HIER WAR DER FEHLER!) ---------
 async function registerSlashCommands() {
   const commands = [
     new SlashCommandBuilder().setName("play").setDescription("Play").addStringOption(o=>o.setName("query").setRequired(true).setDescription("Link")),
@@ -430,7 +440,6 @@ async function registerSlashCommands() {
     new SlashCommandBuilder().setName("about").setDescription("Infos"),
     new SlashCommandBuilder().setName("help").setDescription("Hilfe"),
     new SlashCommandBuilder().setName("volume").setDescription("Lautstärke").addIntegerOption(o=>o.setName("val").setRequired(true).setDescription("0-150")),
-    // DAS HIER HAT GEFEHLT:
     new SlashCommandBuilder().setName("autoplay").setDescription("Autoplay verwalten")
        .addSubcommand(s=>s.setName("add").setDescription("Add").addStringOption(o=>o.setName("url").setRequired(true).setDescription("URL")))
        .addSubcommand(s=>s.setName("list").setDescription("List"))
@@ -442,7 +451,7 @@ async function registerSlashCommands() {
   catch(e){console.error(e);}
 }
 
-// --------- WEB API (RESTORED) ---------
+// --------- WEB API ---------
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
@@ -522,7 +531,6 @@ app.get("/api/np", (req, res) => {
   });
 });
 
-// DAS HAT VORHIN GEFEHLT (WEB API FÜR AUTOPLAY):
 app.get("/api/autoplay/:guildId", auth, (req, res) => {
   const s = ensureGuildSettings(req.params.guildId);
   res.json({ list: s.autoplaylist || [] });
