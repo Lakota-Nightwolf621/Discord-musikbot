@@ -7,8 +7,17 @@ services:
     restart: always
     ports:
       - "8080:8080"
+    # NEU: Netzwerk zuweisen
+    networks:
+      - musicnet
     environment:
       - DISCORD_TOKEN=${DISCORD_TOKEN}
-      - LAVALINK_HOST=${LAVALINK_HOST}
+      # WICHTIG: Im internen Netzwerk nutzen wir den Container-Namen als Host!
+      - LAVALINK_HOST=lavalink-debian
       - LAVALINK_PORT=${LAVALINK_PORT}
       - LAVALINK_PASSWORD=${LAVALINK_PASSWORD}
+
+# NEU: Definition des externen Netzwerks
+networks:
+  musicnet:
+    external: true
