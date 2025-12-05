@@ -1,555 +1,229 @@
-const path = require("path");
-const fs = require("fs");
-const os = require("os");
-const express = require("express");
-const bodyParser = require("body-parser");
-const cors = require("cors");
-const {
-  Client,
-  GatewayIntentBits,
-  Partials,
-  REST,
-  Routes,
-  SlashCommandBuilder,
-  ChannelType,
-  EmbedBuilder,
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle
-} = require("discord.js");
-const { LavalinkManager } = require("lavalink-client");
-
-// --------- ENV ---------
-const DISCORD_TOKEN = process.env.DISCORD_TOKEN || "";
-const WEB_PASSWORD = process.env.WEB_PASSWORD || "changeme";
-const COMMAND_PREFIX = process.env.COMMAND_PREFIX || "!";
-const LAVALINK_HOST = process.env.LAVALINK_HOST || "lavalink";
-const LAVALINK_PORT = Number(process.env.LAVALINK_PORT || 2333);
-const LAVALINK_PASSWORD = process.env.LAVALINK_PASSWORD || "youshallnotpass";
-const LAVALINK_ID = process.env.LAVALINK_ID || "main";
-const WEB_PORT = Number(process.env.PORT || 8080);
-
-if (!DISCORD_TOKEN) console.warn("[WARN] DISCORD_TOKEN fehlt!");
-
-// --------- LOGGING ---------
-const logBuffer = [];
-const MAX_LOG_LINES = 500;
-function addLog(message) {
-  const line = `[${new Date().toISOString()}] ${message}`;
-  console.log(line);
-  logBuffer.push(line);
-  if (logBuffer.length > MAX_LOG_LINES) logBuffer.shift();
-}
-
-// --------- SYSTEM STATS ---------
-function getSystemStats() {
-  const usedMem = process.memoryUsage().rss;
-  const totalSystemMem = os.totalmem();
-  const load = os.loadavg()[0];
-  return {
-    ramUsed: (usedMem / 1024 / 1024).toFixed(2) + " MB",
-    ramPercent: Math.round((usedMem / totalSystemMem) * 100),
-    cpuLoad: load.toFixed(2) + "%",
-    uptime: (process.uptime() / 3600).toFixed(2) + " h"
-  };
-}
-
-// --------- SETTINGS PERSISTENZ ---------
-const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "..", "data");
-const SETTINGS_FILE = process.env.SETTINGS_FILE || path.join(DATA_DIR, "guild-settings.json");
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
-
-const guildSettings = new Map();
-function ensureGuildSettings(gid) {
-  const current = guildSettings.get(gid) || {};
-  if (typeof current.volume !== "number") current.volume = 100;
-  if (!Array.isArray(current.autoplaylist)) current.autoplaylist = [];
-  if (typeof current.autoplayIndex !== "number") current.autoplayIndex = 0;
-  guildSettings.set(gid, current);
-  return current;
-}
-
-function loadGuildSettings() {
-  try {
-    if (!fs.existsSync(SETTINGS_FILE)) return;
-    const raw = fs.readFileSync(SETTINGS_FILE, "utf8");
-    if (!raw) return;
-    const obj = JSON.parse(raw);
-    for (const [gid, val] of Object.entries(obj)) {
-      guildSettings.set(gid, {
-        textChannelId: val.textChannelId || null,
-        voiceChannelId: val.voiceChannelId || null,
-        volume: val.volume || 100,
-        autoplaylist: val.autoplaylist || [],
-        autoplayIndex: val.autoplayIndex || 0,
-      });
-    }
-    addLog(`[config] ${guildSettings.size} Server-Settings geladen.`);
-  } catch (err) { addLog("[config] Fehler: " + err.message); }
-}
-
-let saveTimeout = null;
-function scheduleSaveGuildSettings() {
-  if (saveTimeout) clearTimeout(saveTimeout);
-  saveTimeout = setTimeout(() => {
-    try {
-      const obj = Object.fromEntries(guildSettings);
-      fs.writeFileSync(SETTINGS_FILE, JSON.stringify(obj, null, 2), "utf8");
-    } catch (err) { console.error(err); }
-  }, 1000);
-}
-loadGuildSettings();
-
-// --------- DISCORD CLIENT ---------
-const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.GuildVoiceStates,
-    GatewayIntentBits.MessageContent,
-  ],
-  partials: [Partials.Channel],
-});
-
-let lavalinkReady = false;
-
-client.lavalink = new LavalinkManager({
-  nodes: [{
-    authorization: LAVALINK_PASSWORD,
-    host: LAVALINK_HOST,
-    port: LAVALINK_PORT,
-    id: LAVALINK_ID,
-  }],
-  sendToShard: (guildId, payload) => client.guilds.cache.get(guildId)?.shard?.send(payload),
-  autoSkip: true,
-  client: { id: "0", username: "NightwolfBot" },
-  playerOptions: {
-    defaultSearchPlatform: "ytmsearch",
-    volumeDecrementer: 0.75,
-    clientBasedPositionUpdateInterval: 150,
-  },
-});
-
-client.on("raw", (d) => client.lavalink.sendRawData(d));
-
-// --------- HELPER: PLAYER & EMBEDS ---------
-async function getPlayer(guild, voiceChannelId, textChannelId) {
-  const player = client.lavalink.createPlayer({
-    guildId: guild.id,
-    voiceChannelId,
-    textChannelId,
-    selfDeaf: true
-  });
-  if (!player.connected) await player.connect();
-  return player;
-}
-
-function createNowPlayingEmbed(track, player, status = "Spielt gerade") {
-  const slider = "▬".repeat(15).split("");
-  if (track.info.length && track.info.length > 0) {
-     const pct = Math.min(player.position / track.info.length, 1);
-     const idx = Math.floor(pct * 15);
-     if (idx >= 0 && idx < 15) slider[idx] = "🔘";
-  }
-  const bar = slider.join("");
-
-  return new EmbedBuilder()
-    .setColor(0xff0033)
-    .setTitle("🎶 " + status)
-    .setDescription(`**[${track.info.title}](${track.info.uri})**\nby ${track.info.author}`)
-    .addFields(
-      { name: "Zeit", value: `\`${formatMs(player.position)} / ${formatMs(track.info.length)}\``, inline: true },
-      { name: "Lautstärke", value: `\`${player.volume}%\``, inline: true },
-      { name: "Fortschritt", value: bar, inline: false }
-    )
-    .setThumbnail(track.info.artworkUrl || track.info.thumbnail || null)
-    .setFooter({ text: "Nightwolf Entertainments", iconURL: client.user?.displayAvatarURL() });
-}
-
-function createPlayerButtons(paused = false) {
-  return new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId("pause").setLabel(paused ? "▶️ Weiter" : "⏸️ Pause").setStyle(paused ? ButtonStyle.Success : ButtonStyle.Secondary),
-    new ButtonBuilder().setCustomId("skip").setLabel("⏭️ Skip").setStyle(ButtonStyle.Primary),
-    new ButtonBuilder().setCustomId("stop").setLabel("⏹️ Stop").setStyle(ButtonStyle.Danger),
-    new ButtonBuilder().setCustomId("list").setLabel("📜 Queue").setStyle(ButtonStyle.Secondary)
-  );
-}
-
-const playerMessages = new Map();
-
-// --------- LIVE UPDATE LOOP ---------
-setInterval(() => {
-  for (const [guildId, message] of playerMessages.entries()) {
-    try {
-      const player = client.lavalink.getPlayer(guildId);
-      if (!player || !player.queue.current || player.paused) continue;
-      const embed = createNowPlayingEmbed(player.queue.current, player, "Spielt gerade");
-      message.edit({ embeds: [embed], components: [createPlayerButtons(player.paused)] }).catch(err => {
-         if (err.code === 10008) playerMessages.delete(guildId);
-      });
-    } catch (e) {}
-  }
-}, 5000);
-
-// --------- LAVALINK EVENTS ---------
-client.lavalink.on("nodeConnect", (node) => {
-  lavalinkReady = true;
-  addLog(`[lavalink] Node verbunden: ${node.id}`);
-});
-
-client.lavalink.on("trackStart", async (player, track) => {
-  addLog(`[player ${player.guildId}] Start: ${track.info.title}`);
-  const s = ensureGuildSettings(player.guildId);
-  if(player.volume !== s.volume) await player.setVolume(s.volume);
-
-  const channel = client.channels.cache.get(player.textChannelId);
-  if (channel) {
-    if (playerMessages.has(player.guildId)) {
-      try { await playerMessages.get(player.guildId).delete(); } catch {}
-    }
-    try {
-      const msg = await channel.send({ 
-        embeds: [createNowPlayingEmbed(track, player)], 
-        components: [createPlayerButtons(false)] 
-      });
-      playerMessages.set(player.guildId, msg);
-    } catch (e) { console.error("Embed Error", e); }
-  }
-});
-
-client.lavalink.on("queueEnd", async (player) => {
-  addLog(`[player ${player.guildId}] Queue leer.`);
-  const s = ensureGuildSettings(player.guildId);
-  if (s.autoplaylist && s.autoplaylist.length > 0) {
-    const url = s.autoplaylist[s.autoplayIndex % s.autoplaylist.length];
-    s.autoplayIndex = (s.autoplayIndex + 1) % s.autoplaylist.length;
-    scheduleSaveGuildSettings();
-    addLog(`[autoplay] Spiele: ${url}`);
-    const res = await player.search({ query: url }, client.user);
-    if (res.tracks.length) {
-      await player.queue.add(res.tracks[0]);
-      await player.play();
-      return;
-    }
-  }
-  if (playerMessages.has(player.guildId)) {
-    try { 
-      const msg = playerMessages.get(player.guildId);
-      await msg.edit({ content: "✅ **Queue beendet.**", embeds: [], components: [] }); 
-    } catch {}
-    playerMessages.delete(player.guildId);
-  }
-});
-
-client.once("ready", async () => {
-  addLog(`[discord] Eingeloggt als ${client.user.tag}`);
-  await client.lavalink.init({ id: client.user.id, username: client.user.username });
-  await registerSlashCommands();
-});
-
-// --------- PREFIX COMMANDS ---------
-client.on("messageCreate", async (message) => {
-  if (message.author.bot || !message.guild) return;
-  if (!message.content.startsWith(COMMAND_PREFIX)) return;
-  const args = message.content.slice(COMMAND_PREFIX.length).trim().split(/\s+/);
-  const cmd = args.shift()?.toLowerCase();
-
-  const getPrefixPlayer = async () => {
-    const { channel } = message.member.voice;
-    if (!channel) return null;
-    return getPlayer(message.guild, channel.id, message.channel.id);
-  };
-
-  try {
-    if (cmd === "play" || cmd === "p") {
-      const query = args.join(" ");
-      if (!query) return message.reply("Link/Suche fehlt.");
-      const player = await getPrefixPlayer();
-      if(!player) return message.reply("Komm in den Voice!");
-      const res = await player.search({ query }, message.author);
-      if (!res.tracks.length) return message.reply("Nichts gefunden.");
-      await player.queue.add(res.tracks[0]);
-      if (!player.playing) await player.play();
-      message.reply(`✅ **${res.tracks[0].info.title}** geladen.`);
-    }
-    else if (cmd === "skip" || cmd === "s") {
-      const p = client.lavalink.getPlayer(message.guild.id);
-      if (p) { await p.skip(); message.react("⏭️"); }
-    }
-    else if (cmd === "stop") {
-      const p = client.lavalink.getPlayer(message.guild.id);
-      if (p) { await p.stop(); p.queue.clear(); message.react("⏹️"); }
-    }
-    else if (cmd === "leave") {
-       const p = client.lavalink.getPlayer(message.guild.id);
-       if(p) await p.destroy();
-       message.react("👋");
-    }
-    else if (cmd === "np") {
-       const p = client.lavalink.getPlayer(message.guild.id);
-       if(!p || !p.queue.current) return message.reply("Stille.");
-       const embed = createNowPlayingEmbed(p.queue.current, p);
-       const msg = await message.reply({ embeds: [embed], components: [createPlayerButtons(p.paused)] });
-       playerMessages.set(message.guild.id, msg);
-    }
-    else if (cmd === "autoplay") {
-       const sub = args[0];
-       const s = ensureGuildSettings(message.guild.id);
-       if(sub === "add") {
-         if(!args[1]) return message.reply("URL fehlt.");
-         s.autoplaylist.push(args[1]);
-         message.reply(`Hinzugefügt. Liste: ${s.autoplaylist.length}`);
-       } else if(sub === "clear") {
-         s.autoplaylist = [];
-         message.reply("Liste geleert.");
-       } else {
-         if(!s.autoplaylist.length) return message.reply("Liste ist leer.");
-         const l = s.autoplaylist.map((u,i)=>`${i+1}. ${u}`).join("\n");
-         message.reply(`**Autoplay:**\n${l}`.substring(0,2000));
-       }
-       scheduleSaveGuildSettings();
-    }
-    else if (cmd === "volume") {
-       const val = parseInt(args[0]);
-       if(isNaN(val)) return message.reply("Zahl fehlt");
-       const p = await getPrefixPlayer();
-       if(p) await p.setVolume(val);
-       message.reply("Volume gesetzt.");
-    }
-    else if (cmd === "help") {
-      message.reply("Befehle: `!play`, `!skip`, `!stop`, `!leave`, `!np`, `!volume`, `!autoplay`");
-    }
-  } catch (e) { message.reply("Fehler: " + e.message); }
-});
-
-// --------- INTERACTION HANDLER (Buttons & Slash) ---------
-client.on("interactionCreate", async (interaction) => {
-  // 1. Buttons
-  if (interaction.isButton()) {
-    const player = client.lavalink.getPlayer(interaction.guildId);
-    if (!player) return interaction.reply({ content: "Kein Player.", ephemeral: true });
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <title>Nightwolf Dashboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    /* NIGHTWOLF THEME */
+    :root { --bg: #050505; --panel: #111111; --border: #330000; --primary: #ff0033; --accent: #ffcc00; --text: #e0e0e0; --text-muted: #888; }
+    body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', sans-serif; margin: 0; padding: 20px; background-image: radial-gradient(circle at top right, #330000 0%, transparent 40%); }
+    .container { max-width: 1000px; margin: 0 auto; display: grid; gap: 25px; }
+    .card { background: var(--panel); padding: 25px; border-radius: 15px; border: 1px solid var(--border); box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+    h1, h2, h3 { margin-top: 0; color: var(--primary); text-transform: uppercase; letter-spacing: 1px; }
+    h1 { font-size: 1.8rem; border-bottom: 2px solid var(--primary); padding-bottom: 10px; display: inline-block; }
     
-    if(interaction.member.voice.channelId !== player.voiceChannelId) 
-       return interaction.reply({content:"Falscher Channel!", ephemeral:true});
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; }
+    .stat-box { background: #000; padding: 15px; border-radius: 10px; text-align: center; border: 1px solid #220000; }
+    .stat-val { font-size: 1.4rem; font-weight: bold; color: var(--accent); margin-top: 5px; }
 
-    if (interaction.customId === "pause") {
-      // FIX: Sofort umschalten
-      const neuerStatus = !player.paused;
-      await player.pause(neuerStatus);
-      await interaction.update({ components: [createPlayerButtons(neuerStatus)] });
-    } else if (interaction.customId === "skip") {
-      await player.skip();
-      await interaction.reply({ content: "Skipped.", ephemeral: true });
-    } else if (interaction.customId === "stop") {
-      await player.stop(); player.queue.clear();
-      await interaction.update({ content: "Stopped.", components: [] });
-    } else if (interaction.customId === "list") {
-      const q = player.queue.tracks.map((t,i)=>`${i+1}. ${t.info.title}`).join("\n").substr(0,1000)||"Leer";
-      await interaction.reply({ content: `**Queue:**\n${q}`, ephemeral: true });
-    }
-  }
+    .player-ui { text-align: center; padding: 10px 0; }
+    #npTitle { font-size: 1.3rem; color: #fff; margin-bottom: 5px; }
+    #npAuthor { color: var(--accent); font-weight: bold; }
+    .progress-bar { width: 100%; height: 10px; background: #333; border-radius: 5px; margin-top: 15px; overflow: hidden; border: 1px solid #444; }
+    .progress-fill { height: 100%; background: linear-gradient(90deg, var(--primary), var(--accent)); width: 0%; transition: width 0.5s linear; }
 
-  // 2. Slash Commands
-  if (interaction.isChatInputCommand()) {
-    const cmd = interaction.commandName;
-    try {
-      if (cmd === "play") {
-        await interaction.deferReply();
-        const query = interaction.options.getString("query");
-        const { channel } = interaction.member.voice;
-        if(!channel) return interaction.editReply("Kein Voice!");
-        const p = await getPlayer(interaction.guild, channel.id, interaction.channelId);
-        const r = await p.search({query}, interaction.user);
-        if(!r.tracks.length) return interaction.editReply("Nix gefunden.");
-        await p.queue.add(r.tracks[0]);
-        if(!p.playing) await p.play();
-        interaction.editReply(`✅ **${r.tracks[0].info.title}**`);
-      }
-      else if (cmd === "autoplay") {
-         const sub = interaction.options.getSubcommand();
-         const s = ensureGuildSettings(interaction.guildId);
-         if(sub === "add") {
-             const url = interaction.options.getString("url");
-             s.autoplaylist.push(url);
-             interaction.reply({content: `Hinzugefügt. Liste: ${s.autoplaylist.length}`, ephemeral: true});
-         } else if(sub === "list") {
-             const l = s.autoplaylist.map((u,i)=>`${i+1}. ${u}`).join("\n").substr(0,1000)||"Leer";
-             interaction.reply({content: `**Autoplay:**\n${l}`, ephemeral: true});
-         } else if(sub === "clear") {
-             s.autoplaylist = [];
-             interaction.reply({content: "Liste geleert.", ephemeral: true});
-         }
-         scheduleSaveGuildSettings();
-      }
-      else if (cmd === "volume") {
-         const val = interaction.options.getInteger("val");
-         const p = client.lavalink.getPlayer(interaction.guildId);
-         if(p) await p.setVolume(val);
-         interaction.reply(`Volume: ${val}%`);
-      }
-      else if (cmd === "np") {
-         const p = client.lavalink.getPlayer(interaction.guildId);
-         if(!p || !p.queue.current) return interaction.reply("Stille.");
-         const embed = createNowPlayingEmbed(p.queue.current, p);
-         interaction.reply({ embeds: [embed], components: [createPlayerButtons(p.paused)] });
-      }
-      else if (cmd === "stop") {
-         const p = client.lavalink.getPlayer(interaction.guildId);
-         if(p) { await p.stop(); p.queue.clear(); }
-         interaction.reply("Gestoppt.");
-      }
-      else if (cmd === "skip") {
-         const p = client.lavalink.getPlayer(interaction.guildId);
-         if(p) await p.skip();
-         interaction.reply("Skipped.");
-      }
-      else if (cmd === "leave") {
-         const p = client.lavalink.getPlayer(interaction.guildId);
-         if(p) await p.destroy();
-         interaction.reply("Bye.");
-      }
-      else if (cmd === "about") {
-         const stats = getSystemStats();
-         const embed = new EmbedBuilder().setTitle("Status").setDescription(`RAM: ${stats.ramUsed}\nCPU: ${stats.cpuLoad}\nUptime: ${stats.uptime}`);
-         interaction.reply({embeds:[embed]});
-      }
-      else if (cmd === "help") {
-         interaction.reply({content: "Verfügbare Commands: /play, /skip, /stop, /np, /volume, /autoplay, /about", ephemeral:true});
-      }
-    } catch (e) { interaction.editReply("Fehler: " + e.message); }
-  }
-});
+    input, button, select { padding: 12px; border-radius: 8px; border: 1px solid #444; background: #000; color: #fff; font-size: 1rem; outline: none; }
+    button { background: var(--primary); border: none; cursor: pointer; font-weight: bold; text-transform: uppercase; box-shadow: 0 4px 0 #990000; }
+    button:active { transform: translateY(4px); box-shadow: none; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    button.stop-btn { background: #333; box-shadow: 0 4px 0 #111; }
+    
+    /* Autoplay List Styling */
+    #apList { list-style: none; padding: 0; margin-top: 15px; max-height: 150px; overflow-y: auto; border: 1px solid #333; border-radius: 8px; }
+    #apList li { padding: 8px 12px; border-bottom: 1px solid #222; background: #0a0a0a; display: flex; justify-content: space-between; font-size: 0.9rem; }
+    #apList li:last-child { border-bottom: none; }
+    
+    textarea { width: 100%; height: 200px; background: #050505; color: var(--accent); border: 1px solid #333; padding: 10px; font-family: monospace; border-radius: 8px; }
+    .status-dot { display: inline-block; width: 10px; height: 10px; background: var(--accent); border-radius: 50%; box-shadow: 0 0 10px var(--accent); margin-right: 5px; }
+  </style>
+</head>
+<body>
 
-// --------- SLASH REGISTRATION (Jetzt vollständig!) ---------
-async function registerSlashCommands() {
-  const commands = [
-    new SlashCommandBuilder().setName("play").setDescription("Play").addStringOption(o=>o.setName("query").setRequired(true).setDescription("Link")),
-    new SlashCommandBuilder().setName("stop").setDescription("Stopp"),
-    new SlashCommandBuilder().setName("skip").setDescription("Skip"),
-    new SlashCommandBuilder().setName("leave").setDescription("Leave"),
-    new SlashCommandBuilder().setName("np").setDescription("Now Playing"),
-    new SlashCommandBuilder().setName("about").setDescription("Infos"),
-    new SlashCommandBuilder().setName("help").setDescription("Hilfe"),
-    new SlashCommandBuilder().setName("volume").setDescription("Lautstärke").addIntegerOption(o=>o.setName("val").setRequired(true).setDescription("0-150")),
-    new SlashCommandBuilder().setName("autoplay").setDescription("Autoplay verwalten")
-       .addSubcommand(s=>s.setName("add").setDescription("Add").addStringOption(o=>o.setName("url").setRequired(true).setDescription("URL")))
-       .addSubcommand(s=>s.setName("list").setDescription("List"))
-       .addSubcommand(s=>s.setName("clear").setDescription("Clear")),
-  ].map(c=>c.toJSON());
-  
-  const rest = new REST({version:"10"}).setToken(DISCORD_TOKEN);
-  try { await rest.put(Routes.applicationCommands(client.user.id), { body: commands }); addLog("[discord] Slash CMDs updated."); } 
-  catch(e){console.error(e);}
+<div class="container">
+  <div class="card" style="display: flex; justify-content: space-between; align-items: center; border-color: var(--primary);">
+    <div><h1 style="border:none; margin:0;">🐺 Nightwolf Admin</h1></div>
+    <div id="loginArea">
+      <input type="password" id="apiKey" placeholder="Passwort" />
+      <button onclick="login()">Login</button>
+    </div>
+    <div id="statusArea" style="display:none; color: var(--accent); font-weight: bold;">
+      <span class="status-dot"></span> Verbunden
+    </div>
+  </div>
+
+  <div class="card" id="mainUI" style="display:none;">
+    <h2>System Status</h2>
+    <div class="stats-grid">
+      <div class="stat-box">Bot RAM <div class="stat-val" id="ramVal">-</div></div>
+      <div class="stat-box">CPU Load <div class="stat-val" id="cpuVal">-</div></div>
+      <div class="stat-box">Uptime <div class="stat-val" id="uptimeVal">-</div></div>
+    </div>
+  </div>
+
+  <div class="card" id="playerUI" style="display:none;">
+    <h2>🎧 Live Control</h2>
+    <div style="margin-bottom: 25px; text-align:center;">
+       <label style="color:var(--text-muted);">Server wählen:</label>
+       <select id="serverSelect" onchange="changeServer()" style="width:100%; max-width:400px; border-color:var(--primary);">
+          <option value="">-- Bitte wählen --</option>
+       </select>
+       <button onclick="refreshServers()" style="padding:12px; width:auto; margin-left:5px;">🔄</button>
+    </div>
+    <div class="player-ui">
+      <h3 id="npTitle">Leerlauf</h3>
+      <div id="npAuthor"></div>
+      <div class="progress-bar"><div class="progress-fill" id="progFill"></div></div>
+      <div style="display:flex; justify-content:space-between; margin-top:8px; font-size:0.9rem; color:var(--text-muted);">
+        <span id="currTime">0:00</span><span id="totTime">0:00</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" id="controlsUI" style="display:none;">
+    <h2>Steuerung</h2>
+    <div style="display:flex; gap:10px; margin-bottom:20px;">
+       <input type="text" id="playUrl" placeholder="Link eingeben..." style="flex:1;">
+       <button onclick="control('play')">▶ Play</button>
+    </div>
+    <div style="display:flex; gap:15px; justify-content: center; margin-bottom:30px;">
+       <button style="width:100px;" onclick="control('skip')">⏭ Skip</button>
+       <button style="width:100px;" class="stop-btn" onclick="control('stop')">⏹ Stop</button>
+    </div>
+
+    <div style="border-top:1px solid #333; padding-top:20px;">
+        <h2>♾️ Autoplay Liste</h2>
+        <div style="display:flex; gap:10px; margin-bottom:10px;">
+            <input type="text" id="apUrl" placeholder="YouTube/Spotify Link für Autoplay..." style="flex:1;">
+            <button onclick="addAutoplay()" style="width:auto;">Add</button>
+            <button onclick="clearAutoplay()" class="stop-btn" style="width:auto;">Clear</button>
+        </div>
+        <ul id="apList"></ul>
+    </div>
+    
+    <div style="border-top:1px solid #333; padding-top:20px; margin-top:20px;">
+        <h3 style="font-size:1rem; color:var(--text-muted);">Settings</h3>
+        <div style="display:flex; gap:10px;">
+            <select id="voiceSelect" style="flex:1;"></select>
+            <button onclick="saveSettings()" class="stop-btn" style="width:auto;">Save</button>
+        </div>
+    </div>
+  </div>
+
+  <div class="card" id="logUI" style="display:none;">
+    <h2>Logs</h2>
+    <textarea id="logArea" readonly></textarea>
+  </div>
+</div>
+
+<script>
+let token="", currentGid="", playerInterval=null;
+
+function login(){
+  token=document.getElementById('apiKey').value;
+  if(!token) return alert("PW fehlt");
+  fetch('/api/status',{headers:{'x-api-key':token}}).then(r=>{if(r.status===401)throw new Error("Falsches PW");return r.json()})
+  .then(d=>{
+    document.getElementById('loginArea').style.display='none';
+    document.getElementById('statusArea').style.display='block';
+    ['mainUI','playerUI','controlsUI','logUI'].forEach(id=>document.getElementById(id).style.display='block');
+    updateStats(d.system); fillServerList(d.guilds);
+    setInterval(loadStats,5000); setInterval(loadLogs,3000); startPlayerLoop();
+  }).catch(e=>alert(e.message));
 }
 
-// --------- WEB API (Autoplay + Rest) ---------
-const app = express();
-app.use(cors());
-app.use(bodyParser.json());
-app.use(express.static(path.join(__dirname, "..", "public")));
-
-function auth(req, res, next) {
-  if (req.headers["x-api-key"] !== WEB_PASSWORD) return res.status(401).json({ error: "No Auth" });
-  next();
+function refreshServers(){ fetch('/api/status',{headers:{'x-api-key':token}}).then(r=>r.json()).then(d=>fillServerList(d.guilds)); }
+function fillServerList(g){
+  const s=document.getElementById('serverSelect'), old=s.value; s.innerHTML='<option value="">-- Wählen --</option>';
+  if(!g||!g.length) return;
+  g.forEach(x=>{ let o=document.createElement('option'); o.value=x.id; o.innerText=x.name; s.appendChild(o); });
+  if(old) s.value=old;
 }
 
-app.get("/api/status", auth, async (req, res) => {
-  if (client.guilds.cache.size === 0) await client.guilds.fetch();
-  res.json({
-    botOnline: !!client.user,
-    lavalinkReady,
-    system: getSystemStats(),
-    guilds: client.guilds.cache.map(g => ({ id: g.id, name: g.name })).sort((a,b)=>a.name.localeCompare(b.name))
+function changeServer(){
+  currentGid=document.getElementById('serverSelect').value;
+  document.getElementById('apList').innerHTML = ''; 
+  if(!currentGid) return;
+  loadGuildDetails(); updatePlayer(); loadAutoplay(); 
+}
+
+function loadGuildDetails(){
+  fetch(`/api/guilds/${currentGid}/details`,{headers:{'x-api-key':token}}).then(r=>r.json()).then(d=>{
+    const v=document.getElementById('voiceSelect'); v.innerHTML='<option value="">-- Voice --</option>';
+    d.voiceChannels.forEach(c=>{ let o=document.createElement('option'); o.value=c.id; o.innerText=c.name; v.appendChild(o); });
+    if(d.settings.voiceChannelId) v.value=d.settings.voiceChannelId;
   });
-});
-
-app.get("/api/guilds/:id/details", auth, async (req, res) => {
-  const g = client.guilds.cache.get(req.params.id);
-  if(!g) return res.status(404).json({error:"Server nicht gefunden"});
-  const channels = g.channels.cache.filter(c => c.type === ChannelType.GuildVoice).map(c => ({ id: c.id, name: c.name }));
-  const s = guildSettings.get(g.id) || {};
-  res.json({ name: g.name, voiceChannels: channels, settings: s });
-});
-
-app.post("/api/guilds/:id/settings", auth, (req, res) => {
-  const s = ensureGuildSettings(req.params.id);
-  if(req.body.voiceChannelId) s.voiceChannelId = req.body.voiceChannelId;
-  scheduleSaveGuildSettings();
-  res.json({ok:true});
-});
-
-app.post("/api/guilds/:id/play", auth, async (req, res) => {
-  const gid = req.params.id;
-  const { query } = req.body;
-  const s = ensureGuildSettings(gid);
-  let vc = s.voiceChannelId;
-  if(!vc) {
-     const g = client.guilds.cache.get(gid);
-     const first = g.channels.cache.find(c => c.type === ChannelType.GuildVoice);
-     if(first) vc = first.id;
-     else return res.status(400).json({error: "Kein VoiceChannel"});
-  }
-  try {
-    const guild = client.guilds.cache.get(gid);
-    const player = await getPlayer(guild, vc, null);
-    const result = await player.search({ query }, { id: "0", username: "WebUI" });
-    if(!result.tracks.length) return res.status(404).json({error:"Nichts gefunden"});
-    await player.queue.add(result.tracks[0]);
-    if(!player.playing) await player.play();
-    res.json({ok:true, track: result.tracks[0].info.title});
-  } catch(e) { res.status(500).json({error:e.message}); }
-});
-
-app.post("/api/guilds/:id/:action", auth, async (req, res) => {
-   const player = client.lavalink.getPlayer(req.params.id);
-   if(!player) return res.status(400).json({error:"Kein Player"});
-   if(req.params.action === "skip") await player.skip();
-   if(req.params.action === "stop") { await player.stop(); player.queue.clear(); }
-   res.json({ok:true});
-});
-
-app.get("/api/np", (req, res) => {
-  const gid = req.query.guildId;
-  const player = client.lavalink.getPlayer(gid);
-  if (!player || !player.queue.current) return res.json({ playing: false });
-  res.json({
-    playing: true,
-    title: player.queue.current.info.title,
-    author: player.queue.current.info.author,
-    position: player.position,
-    duration: player.queue.current.info.length,
-    volume: player.volume
-  });
-});
-
-// Autoplay Web API
-app.get("/api/autoplay/:guildId", auth, (req, res) => {
-  const s = ensureGuildSettings(req.params.guildId);
-  res.json({ list: s.autoplaylist || [] });
-});
-app.post("/api/autoplay/:guildId/add", auth, (req, res) => {
-  const s = ensureGuildSettings(req.params.guildId);
-  if (req.body.url) s.autoplaylist.push(req.body.url.trim());
-  scheduleSaveGuildSettings();
-  res.json({ list: s.autoplaylist });
-});
-app.post("/api/autoplay/:guildId/clear", auth, (req, res) => {
-  const s = ensureGuildSettings(req.params.guildId);
-  s.autoplaylist = [];
-  scheduleSaveGuildSettings();
-  res.json({ list: [] });
-});
-
-app.get("/api/logs", auth, (req, res) => res.json({ lines: logBuffer }));
-app.get("*", (req, res) => res.sendFile(path.join(__dirname, "..", "public", "index.html")));
-
-app.listen(WEB_PORT, () => addLog(`Webinterface auf Port ${WEB_PORT}`));
-
-function formatMs(ms) {
-  if(!ms) return "0:00";
-  const s = Math.floor(ms / 1000) % 60;
-  const m = Math.floor(ms / 1000 / 60);
-  return `${m}:${s.toString().padStart(2, '0')}`;
 }
 
-client.login(DISCORD_TOKEN);
+function loadAutoplay() {
+    if(!currentGid) return;
+    fetch(`/api/autoplay/${currentGid}`, {headers:{'x-api-key':token}})
+    .then(r=>r.json()).then(d => renderAutoplayList(d.list));
+}
+function addAutoplay() {
+    const url = document.getElementById('apUrl').value;
+    if(!url || !currentGid) return;
+    fetch(`/api/autoplay/${currentGid}/add`, {
+        method:'POST', headers:{'x-api-key':token, 'Content-Type':'application/json'}, body:JSON.stringify({url})
+    }).then(r=>r.json()).then(d => {
+        document.getElementById('apUrl').value = '';
+        renderAutoplayList(d.list);
+    });
+}
+function clearAutoplay() {
+    if(!currentGid) return;
+    fetch(`/api/autoplay/${currentGid}/clear`, {method:'POST', headers:{'x-api-key':token}})
+    .then(r=>r.json()).then(d => renderAutoplayList(d.list));
+}
+function renderAutoplayList(list) {
+    const ul = document.getElementById('apList');
+    ul.innerHTML = '';
+    if(!list || !list.length) { ul.innerHTML = '<li style="color:#666">Liste leer</li>'; return; }
+    list.forEach((u, i) => {
+        const li = document.createElement('li');
+        li.innerText = `${i+1}. ${u}`;
+        ul.appendChild(li);
+    });
+}
+
+function control(action){
+  if(!currentGid) return alert("Server wählen!");
+  if(action==='play'){
+    const q=document.getElementById('playUrl').value;
+    fetch(`/api/guilds/${currentGid}/play`,{method:'POST',headers:{'x-api-key':token,'Content-Type':'application/json'},body:JSON.stringify({query:q})})
+    .then(r=>r.json()).then(d=>{ if(d.error)alert(d.error); else{document.getElementById('playUrl').value=''; updatePlayer();} });
+  } else {
+    fetch(`/api/guilds/${currentGid}/${action}`,{method:'POST',headers:{'x-api-key':token}}).then(()=>setTimeout(updatePlayer,500));
+  }
+}
+
+function saveSettings(){
+  if(!currentGid)return;
+  const v=document.getElementById('voiceSelect').value;
+  fetch(`/api/guilds/${currentGid}/settings`,{method:'POST',headers:{'x-api-key':token,'Content-Type':'application/json'},body:JSON.stringify({voiceChannelId:v})}).then(()=>alert("Gespeichert"));
+}
+
+function loadStats(){ fetch('/api/status',{headers:{'x-api-key':token}}).then(r=>r.json()).then(d=>updateStats(d.system)); }
+function updateStats(s){ if(!s)return; document.getElementById('ramVal').innerText=s.ramUsed; document.getElementById('cpuVal').innerText=s.cpuLoad; document.getElementById('uptimeVal').innerText=s.uptime; }
+function loadLogs(){ 
+    fetch('/api/logs',{headers:{'x-api-key':token}}).then(r=>r.json()).then(d=>{
+        const el=document.getElementById('logArea'); 
+        const scroll=el.scrollTop+el.clientHeight>=el.scrollHeight-50; 
+        el.value=d.lines.join("\n"); if(scroll)el.scrollTop=el.scrollHeight; 
+    }); 
+}
+
+function startPlayerLoop(){ if(playerInterval)clearInterval(playerInterval); playerInterval=setInterval(updatePlayer,1000); }
+function updatePlayer(){
+  if(!currentGid)return;
+  fetch(`/api/np?guildId=${currentGid}`).then(r=>r.json()).then(d=>{
+    const t=document.getElementById('npTitle'), a=document.getElementById('npAuthor'), b=document.getElementById('progFill');
+    if(!d.playing){ t.innerText="Leerlauf"; t.style.color="#888"; a.innerText=""; b.style.width="0%"; return; }
+    t.innerText=d.title; t.style.color="#fff"; a.innerText=d.author;
+    if(d.duration>0){ b.style.width=Math.min((d.position/d.duration)*100,100)+"%"; document.getElementById('currTime').innerText=fmt(d.position); document.getElementById('totTime').innerText=fmt(d.duration); }
+  }).catch(()=>{});
+}
+function fmt(ms){ if(!ms)return"0:00"; const s=Math.floor(ms/1000)%60, m=Math.floor(ms/1000/60); return`${m}:${s.toString().padStart(2,'0')}`; }
+</script>
+</body>
+</html>
