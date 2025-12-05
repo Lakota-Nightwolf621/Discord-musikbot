@@ -5,152 +5,46 @@
   <title>Nightwolf Dashboard</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <style>
-    /* NIGHTWOLF THEME: Black, Red, Yellow */
-    :root {
-      --bg: #050505;           /* Fast schwarzer Hintergrund */
-      --panel: #111111;        /* Etwas helleres Schwarz für Karten */
-      --border: #330000;       /* Dunkelroter Rand */
-      --primary: #ff0033;      /* Hauptfarbe Rot (Buttons, Titel) */
-      --accent: #ffcc00;       /* Akzentfarbe Gelb (Werte, Highlights) */
-      --text: #e0e0e0;         /* Helles Grau für Text */
-      --text-muted: #888;      /* Dunkles Grau für Nebentext */
-    }
-
-    body {
-      background: var(--bg);
-      color: var(--text);
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      margin: 0;
-      padding: 20px;
-      /* Subtiler roter Verlauf im Hintergrund */
-      background-image: radial-gradient(circle at top right, #330000 0%, transparent 40%);
-    }
-
-    .container {
-      max-width: 1000px;
-      margin: 0 auto;
-      display: grid;
-      gap: 25px;
-    }
-
-    .card {
-      background: var(--panel);
-      padding: 25px;
-      border-radius: 15px;
-      border: 1px solid var(--border);
-      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.5);
-    }
-
-    h1, h2, h3 {
-      margin-top: 0;
-      color: var(--primary);
-      text-transform: uppercase;
-      letter-spacing: 1px;
-    }
-    
+    /* NIGHTWOLF THEME */
+    :root { --bg: #050505; --panel: #111111; --border: #330000; --primary: #ff0033; --accent: #ffcc00; --text: #e0e0e0; --text-muted: #888; }
+    body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', sans-serif; margin: 0; padding: 20px; background-image: radial-gradient(circle at top right, #330000 0%, transparent 40%); }
+    .container { max-width: 1000px; margin: 0 auto; display: grid; gap: 25px; }
+    .card { background: var(--panel); padding: 25px; border-radius: 15px; border: 1px solid var(--border); box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
+    h1, h2, h3 { margin-top: 0; color: var(--primary); text-transform: uppercase; letter-spacing: 1px; }
     h1 { font-size: 1.8rem; border-bottom: 2px solid var(--primary); padding-bottom: 10px; display: inline-block; }
+    
+    .stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 15px; }
+    .stat-box { background: #000; padding: 15px; border-radius: 10px; text-align: center; border: 1px solid #220000; }
+    .stat-val { font-size: 1.4rem; font-weight: bold; color: var(--accent); margin-top: 5px; }
 
-    /* STATS GRID */
-    .stats-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-      gap: 15px;
-    }
-    .stat-box {
-      background: #000;
-      padding: 15px;
-      border-radius: 10px;
-      text-align: center;
-      border: 1px solid #220000;
-    }
-    .stat-val {
-      font-size: 1.4rem;
-      font-weight: bold;
-      color: var(--accent);
-      margin-top: 5px;
-    }
-
-    /* PLAYER */
     .player-ui { text-align: center; padding: 10px 0; }
     #npTitle { font-size: 1.3rem; color: #fff; margin-bottom: 5px; }
     #npAuthor { color: var(--accent); font-weight: bold; }
-    
-    .progress-bar {
-      width: 100%;
-      height: 10px;
-      background: #333;
-      border-radius: 5px;
-      margin-top: 15px;
-      overflow: hidden;
-      border: 1px solid #444;
-    }
-    .progress-fill {
-      height: 100%;
-      background: linear-gradient(90deg, var(--primary), var(--accent));
-      width: 0%;
-      transition: width 0.5s linear;
-    }
+    .progress-bar { width: 100%; height: 10px; background: #333; border-radius: 5px; margin-top: 15px; overflow: hidden; border: 1px solid #444; }
+    .progress-fill { height: 100%; background: linear-gradient(90deg, var(--primary), var(--accent)); width: 0%; transition: width 0.5s linear; }
 
-    /* CONTROLS */
-    input, button, select {
-      padding: 12px;
-      border-radius: 8px;
-      border: 1px solid #444;
-      background: #000;
-      color: #fff;
-      font-size: 1rem;
-      outline: none;
-    }
-    input:focus, select:focus { border-color: var(--accent); }
-    
-    button {
-      background: var(--primary);
-      border: none;
-      cursor: pointer;
-      font-weight: bold;
-      text-transform: uppercase;
-      transition: all 0.2s;
-      box-shadow: 0 4px 0 #990000; /* 3D Effekt */
-    }
+    input, button, select { padding: 12px; border-radius: 8px; border: 1px solid #444; background: #000; color: #fff; font-size: 1rem; outline: none; }
+    button { background: var(--primary); border: none; cursor: pointer; font-weight: bold; text-transform: uppercase; box-shadow: 0 4px 0 #990000; }
     button:active { transform: translateY(4px); box-shadow: none; }
-    button:disabled { opacity: 0.5; cursor: not-allowed; box-shadow: none; transform: translateY(4px); }
-    
-    button.action-btn { width: 100px; }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
     button.stop-btn { background: #333; box-shadow: 0 4px 0 #111; }
-    button.stop-btn:hover { background: #555; }
-
-    textarea {
-      width: 100%;
-      height: 200px;
-      background: #050505;
-      color: var(--accent);
-      border: 1px solid #333;
-      padding: 10px;
-      font-family: 'Consolas', monospace;
-      font-size: 0.9rem;
-      border-radius: 8px;
-    }
-
-    .status-dot {
-      display: inline-block;
-      width: 10px; 
-      height: 10px; 
-      background: var(--accent); 
-      border-radius: 50%;
-      box-shadow: 0 0 10px var(--accent);
-      margin-right: 5px;
-    }
+    
+    /* Autoplay List Styling */
+    #apList { list-style: none; padding: 0; margin-top: 15px; max-height: 150px; overflow-y: auto; border: 1px solid #333; border-radius: 8px; }
+    #apList li { padding: 8px 12px; border-bottom: 1px solid #222; background: #0a0a0a; display: flex; justify-content: space-between; font-size: 0.9rem; }
+    #apList li:last-child { border-bottom: none; }
+    
+    textarea { width: 100%; height: 200px; background: #050505; color: var(--accent); border: 1px solid #333; padding: 10px; font-family: monospace; border-radius: 8px; }
+    .status-dot { display: inline-block; width: 10px; height: 10px; background: var(--accent); border-radius: 50%; box-shadow: 0 0 10px var(--accent); margin-right: 5px; }
   </style>
 </head>
 <body>
 
 <div class="container">
   <div class="card" style="display: flex; justify-content: space-between; align-items: center; border-color: var(--primary);">
-    <div>
-      <h1 style="border:none; margin:0;">🐺 Nightwolf Admin</h1>
-    </div>
+    <div><h1 style="border:none; margin:0;">🐺 Nightwolf Admin</h1></div>
     <div id="loginArea">
-      <input type="password" id="apiKey" placeholder="Admin Passwort" />
+      <input type="password" id="apiKey" placeholder="Passwort" />
       <button onclick="login()">Login</button>
     </div>
     <div id="statusArea" style="display:none; color: var(--accent); font-weight: bold;">
@@ -169,17 +63,15 @@
 
   <div class="card" id="playerUI" style="display:none;">
     <h2>🎧 Live Control</h2>
-    
     <div style="margin-bottom: 25px; text-align:center;">
-       <label style="color:var(--text-muted); display:block; margin-bottom:5px;">Wähle einen Server zum Steuern:</label>
-       <select id="serverSelect" onchange="changeServer()" style="width: 100%; max-width: 400px; border-color: var(--primary);">
+       <label style="color:var(--text-muted);">Server wählen:</label>
+       <select id="serverSelect" onchange="changeServer()" style="width:100%; max-width:400px; border-color:var(--primary);">
           <option value="">-- Bitte wählen --</option>
        </select>
-       <button onclick="refreshServers()" style="margin-left:5px; padding: 12px; width:auto;">🔄</button>
+       <button onclick="refreshServers()" style="padding:12px; width:auto; margin-left:5px;">🔄</button>
     </div>
-
     <div class="player-ui">
-      <h3 id="npTitle">Kein Server gewählt / Leerlauf</h3>
+      <h3 id="npTitle">Leerlauf</h3>
       <div id="npAuthor"></div>
       <div class="progress-bar"><div class="progress-fill" id="progFill"></div></div>
       <div style="display:flex; justify-content:space-between; margin-top:8px; font-size:0.9rem; color:var(--text-muted);">
@@ -191,213 +83,148 @@
   <div class="card" id="controlsUI" style="display:none;">
     <h2>Steuerung</h2>
     <div style="display:flex; gap:10px; margin-bottom:20px;">
-       <input type="text" id="playUrl" placeholder="YouTube / Spotify Link eingeben..." style="flex:1;">
+       <input type="text" id="playUrl" placeholder="Link eingeben..." style="flex:1;">
        <button onclick="control('play')">▶ Play</button>
     </div>
-    <div style="display:flex; gap:15px; justify-content: center;">
-       <button class="action-btn" onclick="control('skip')">⏭ Skip</button>
-       <button class="action-btn stop-btn" onclick="control('stop')">⏹ Stop</button>
+    <div style="display:flex; gap:15px; justify-content: center; margin-bottom:30px;">
+       <button style="width:100px;" onclick="control('skip')">⏭ Skip</button>
+       <button style="width:100px;" class="stop-btn" onclick="control('stop')">⏹ Stop</button>
+    </div>
+
+    <div style="border-top:1px solid #333; padding-top:20px;">
+        <h2>♾️ Autoplay Liste</h2>
+        <div style="display:flex; gap:10px; margin-bottom:10px;">
+            <input type="text" id="apUrl" placeholder="YouTube/Spotify Link für Autoplay..." style="flex:1;">
+            <button onclick="addAutoplay()" style="width:auto;">Add</button>
+            <button onclick="clearAutoplay()" class="stop-btn" style="width:auto;">Clear</button>
+        </div>
+        <ul id="apList"></ul>
     </div>
     
-    <div style="margin-top:30px; border-top:1px solid #333; padding-top:20px;">
-        <h3 style="font-size:1rem; color:var(--text-muted);">Einstellungen für gewählten Server</h3>
+    <div style="border-top:1px solid #333; padding-top:20px; margin-top:20px;">
+        <h3 style="font-size:1rem; color:var(--text-muted);">Settings</h3>
         <div style="display:flex; gap:10px;">
             <select id="voiceSelect" style="flex:1;"></select>
-            <button onclick="saveSettings()" style="background:#222; border:1px solid #444; width:auto;">Speichern</button>
+            <button onclick="saveSettings()" class="stop-btn" style="width:auto;">Save</button>
         </div>
     </div>
   </div>
 
   <div class="card" id="logUI" style="display:none;">
-    <h2>System Logs</h2>
+    <h2>Logs</h2>
     <textarea id="logArea" readonly></textarea>
   </div>
 </div>
 
 <script>
-let token = "";
-let currentGid = "";
-let playerInterval = null;
+let token="", currentGid="", playerInterval=null;
 
-// Login Funktion
-function login() {
-  token = document.getElementById('apiKey').value;
-  if(!token) return alert("Bitte Passwort eingeben");
-  
-  fetch('/api/status', { headers: { 'x-api-key': token } })
-    .then(r => { if(r.status===401) throw new Error("Falsches Passwort!"); return r.json(); })
-    .then(data => {
-      // Login erfolgreich -> UI anzeigen
-      document.getElementById('loginArea').style.display='none';
-      document.getElementById('statusArea').style.display='block';
-      ['mainUI','playerUI','controlsUI','logUI'].forEach(id => document.getElementById(id).style.display='block');
-      
-      // Initiale Daten laden
-      updateStats(data.system);
-      fillServerList(data.guilds); // Hier wird die Liste gefüllt!
-      
-      // Loops starten
-      setInterval(loadStats, 5000);
-      setInterval(loadLogs, 3000);
-      startPlayerLoop();
-    })
-    .catch(e => alert(e.message));
+function login(){
+  token=document.getElementById('apiKey').value;
+  if(!token) return alert("PW fehlt");
+  fetch('/api/status',{headers:{'x-api-key':token}}).then(r=>{if(r.status===401)throw new Error("Falsches PW");return r.json()})
+  .then(d=>{
+    document.getElementById('loginArea').style.display='none';
+    document.getElementById('statusArea').style.display='block';
+    ['mainUI','playerUI','controlsUI','logUI'].forEach(id=>document.getElementById(id).style.display='block');
+    updateStats(d.system); fillServerList(d.guilds);
+    setInterval(loadStats,5000); setInterval(loadLogs,3000); startPlayerLoop();
+  }).catch(e=>alert(e.message));
 }
 
-// Serverliste neu laden (Manuell)
-function refreshServers() {
-    fetch('/api/status', { headers: { 'x-api-key': token } })
-    .then(r=>r.json()).then(d => fillServerList(d.guilds));
+function refreshServers(){ fetch('/api/status',{headers:{'x-api-key':token}}).then(r=>r.json()).then(d=>fillServerList(d.guilds)); }
+function fillServerList(g){
+  const s=document.getElementById('serverSelect'), old=s.value; s.innerHTML='<option value="">-- Wählen --</option>';
+  if(!g||!g.length) return;
+  g.forEach(x=>{ let o=document.createElement('option'); o.value=x.id; o.innerText=x.name; s.appendChild(o); });
+  if(old) s.value=old;
 }
 
-// Dropdown füllen
-function fillServerList(guilds) {
-  const sel = document.getElementById('serverSelect');
-  const oldVal = sel.value; // Merken was ausgewählt war
-  sel.innerHTML = '<option value="">-- Bitte Server wählen --</option>';
-  
-  if(!guilds || guilds.length === 0) {
-      const opt = document.createElement('option');
-      opt.text = "Keine Server gefunden (Bot lädt noch?)";
-      sel.appendChild(opt);
-      return;
-  }
+function changeServer(){
+  currentGid=document.getElementById('serverSelect').value;
+  document.getElementById('apList').innerHTML = ''; // Liste leeren beim Wechsel
+  if(!currentGid) return;
+  loadGuildDetails(); updatePlayer(); loadAutoplay(); // Autoplay laden!
+}
 
-  guilds.forEach(g => {
-    const opt = document.createElement('option');
-    opt.value = g.id; 
-    opt.innerText = g.name;
-    sel.appendChild(opt);
+function loadGuildDetails(){
+  fetch(`/api/guilds/${currentGid}/details`,{headers:{'x-api-key':token}}).then(r=>r.json()).then(d=>{
+    const v=document.getElementById('voiceSelect'); v.innerHTML='<option value="">-- Voice --</option>';
+    d.voiceChannels.forEach(c=>{ let o=document.createElement('option'); o.value=c.id; o.innerText=c.name; v.appendChild(o); });
+    if(d.settings.voiceChannelId) v.value=d.settings.voiceChannelId;
   });
-  
-  if(oldVal) sel.value = oldVal; // Auswahl wiederherstellen
 }
 
-// Wenn Nutzer anderen Server wählt
-function changeServer() {
-  currentGid = document.getElementById('serverSelect').value;
-  document.getElementById('voiceSelect').innerHTML = ''; // Reset Voice List
-  
-  if(!currentGid) {
-      document.getElementById('npTitle').innerText = "Kein Server gewählt";
-      return;
-  }
-  
-  loadGuildDetails();
-  updatePlayer(); // Sofort updaten
+// AUTOPLAY FUNCTIONS
+function loadAutoplay() {
+    if(!currentGid) return;
+    fetch(`/api/autoplay/${currentGid}`, {headers:{'x-api-key':token}})
+    .then(r=>r.json()).then(d => renderAutoplayList(d.list));
 }
-
-// Details (Channels) für gewählten Server holen
-function loadGuildDetails() {
-  fetch(`/api/guilds/${currentGid}/details`, { headers: { 'x-api-key': token } })
-    .then(r=>r.json())
-    .then(d => {
-       const vsel = document.getElementById('voiceSelect');
-       vsel.innerHTML = '<option value="">-- Standard Voice Channel --</option>';
-       d.voiceChannels.forEach(c => {
-         const opt = document.createElement('option');
-         opt.value = c.id; opt.innerText = c.name;
-         vsel.appendChild(opt);
-       });
-       if(d.settings.voiceChannelId) vsel.value = d.settings.voiceChannelId;
+function addAutoplay() {
+    const url = document.getElementById('apUrl').value;
+    if(!url || !currentGid) return;
+    fetch(`/api/autoplay/${currentGid}/add`, {
+        method:'POST', headers:{'x-api-key':token, 'Content-Type':'application/json'}, body:JSON.stringify({url})
+    }).then(r=>r.json()).then(d => {
+        document.getElementById('apUrl').value = '';
+        renderAutoplayList(d.list);
+    });
+}
+function clearAutoplay() {
+    if(!currentGid) return;
+    fetch(`/api/autoplay/${currentGid}/clear`, {method:'POST', headers:{'x-api-key':token}})
+    .then(r=>r.json()).then(d => renderAutoplayList(d.list));
+}
+function renderAutoplayList(list) {
+    const ul = document.getElementById('apList');
+    ul.innerHTML = '';
+    if(!list || !list.length) { ul.innerHTML = '<li style="color:#666">Liste leer</li>'; return; }
+    list.forEach((u, i) => {
+        const li = document.createElement('li');
+        li.innerText = `${i+1}. ${u}`;
+        ul.appendChild(li);
     });
 }
 
-// Player Aktionen
-function control(action) {
-  if(!currentGid) return alert("Bitte erst oben einen Server auswählen!");
-  
-  if(action === 'play') {
-    const query = document.getElementById('playUrl').value;
-    if(!query) return alert("Bitte Link eingeben");
-    
-    fetch(`/api/guilds/${currentGid}/play`, {
-       method:'POST', headers:{'x-api-key':token, 'Content-Type':'application/json'},
-       body: JSON.stringify({query})
-    }).then(r=>r.json()).then(d=>{
-       if(d.error) alert("Fehler: " + d.error);
-       else { document.getElementById('playUrl').value=''; updatePlayer(); }
-    });
+function control(action){
+  if(!currentGid) return alert("Server wählen!");
+  if(action==='play'){
+    const q=document.getElementById('playUrl').value;
+    fetch(`/api/guilds/${currentGid}/play`,{method:'POST',headers:{'x-api-key':token,'Content-Type':'application/json'},body:JSON.stringify({query:q})})
+    .then(r=>r.json()).then(d=>{ if(d.error)alert(d.error); else{document.getElementById('playUrl').value=''; updatePlayer();} });
   } else {
-    fetch(`/api/guilds/${currentGid}/${action}`, {
-       method:'POST', headers:{'x-api-key':token}
-    }).then(() => setTimeout(updatePlayer, 500));
+    fetch(`/api/guilds/${currentGid}/${action}`,{method:'POST',headers:{'x-api-key':token}}).then(()=>setTimeout(updatePlayer,500));
   }
 }
 
-// Settings speichern
-function saveSettings() {
-  if(!currentGid) return;
-  const vid = document.getElementById('voiceSelect').value;
-  fetch(`/api/guilds/${currentGid}/settings`, {
-     method:'POST', headers:{'x-api-key':token, 'Content-Type':'application/json'},
-     body: JSON.stringify({ voiceChannelId: vid })
-  }).then(()=>alert("Einstellung gespeichert!"));
+function saveSettings(){
+  if(!currentGid)return;
+  const v=document.getElementById('voiceSelect').value;
+  fetch(`/api/guilds/${currentGid}/settings`,{method:'POST',headers:{'x-api-key':token,'Content-Type':'application/json'},body:JSON.stringify({voiceChannelId:v})}).then(()=>alert("Gespeichert"));
 }
 
-// System Stats Loop
-function loadStats() {
-  fetch('/api/status', { headers: { 'x-api-key': token } }).then(r=>r.json()).then(d=>updateStats(d.system));
-}
-function updateStats(s) {
-  if(!s) return;
-  document.getElementById('ramVal').innerText = s.ramUsed;
-  document.getElementById('cpuVal').innerText = s.cpuLoad;
-  document.getElementById('uptimeVal').innerText = s.uptime;
-}
-
-// Logs Loop
-function loadLogs() {
-  fetch('/api/logs', { headers: { 'x-api-key': token } }).then(r=>r.json()).then(d=>{
-     const el=document.getElementById('logArea'); 
-     // Nur scrollen wenn man unten ist, sonst nervt es beim lesen
-     const shouldScroll = el.scrollTop + el.clientHeight >= el.scrollHeight - 50;
-     el.value=d.lines.join("\n"); 
-     if(shouldScroll) el.scrollTop=el.scrollHeight;
-  });
+function loadStats(){ fetch('/api/status',{headers:{'x-api-key':token}}).then(r=>r.json()).then(d=>updateStats(d.system)); }
+function updateStats(s){ if(!s)return; document.getElementById('ramVal').innerText=s.ramUsed; document.getElementById('cpuVal').innerText=s.cpuLoad; document.getElementById('uptimeVal').innerText=s.uptime; }
+function loadLogs(){ 
+    fetch('/api/logs',{headers:{'x-api-key':token}}).then(r=>r.json()).then(d=>{
+        const el=document.getElementById('logArea'); 
+        const scroll=el.scrollTop+el.clientHeight>=el.scrollHeight-50; 
+        el.value=d.lines.join("\n"); if(scroll)el.scrollTop=el.scrollHeight; 
+    }); 
 }
 
-// Player Loop (1 Sekunde)
-function startPlayerLoop() {
-  if(playerInterval) clearInterval(playerInterval);
-  playerInterval = setInterval(updatePlayer, 1000);
+function startPlayerLoop(){ if(playerInterval)clearInterval(playerInterval); playerInterval=setInterval(updatePlayer,1000); }
+function updatePlayer(){
+  if(!currentGid)return;
+  fetch(`/api/np?guildId=${currentGid}`).then(r=>r.json()).then(d=>{
+    const t=document.getElementById('npTitle'), a=document.getElementById('npAuthor'), b=document.getElementById('progFill');
+    if(!d.playing){ t.innerText="Leerlauf"; t.style.color="#888"; a.innerText=""; b.style.width="0%"; return; }
+    t.innerText=d.title; t.style.color="#fff"; a.innerText=d.author;
+    if(d.duration>0){ b.style.width=Math.min((d.position/d.duration)*100,100)+"%"; document.getElementById('currTime').innerText=fmt(d.position); document.getElementById('totTime').innerText=fmt(d.duration); }
+  }).catch(()=>{});
 }
-
-function updatePlayer() {
-  if(!currentGid) return;
-  fetch(`/api/np?guildId=${currentGid}`).then(r=>r.json()).then(d => {
-    const titleEl = document.getElementById('npTitle');
-    const authEl = document.getElementById('npAuthor');
-    const barEl = document.getElementById('progFill');
-    
-    if(!d.playing) {
-       titleEl.innerText = "Nichts wird abgespielt";
-       titleEl.style.color = "#888";
-       authEl.innerText = "";
-       barEl.style.width="0%";
-       document.getElementById('currTime').innerText="0:00";
-       document.getElementById('totTime').innerText="0:00";
-       return;
-    }
-    
-    titleEl.innerText = d.title || "Unbekannt";
-    titleEl.style.color = "#fff";
-    authEl.innerText = d.author || "";
-    
-    if(d.duration > 0) {
-       const pct = Math.min((d.position / d.duration)*100, 100);
-       barEl.style.width=pct+"%";
-       document.getElementById('currTime').innerText=fmt(d.position);
-       document.getElementById('totTime').innerText=fmt(d.duration);
-    }
-  }).catch(() => {});
-}
-
-function fmt(ms) {
-  if(!ms) return "0:00";
-  const s=Math.floor(ms/1000)%60, m=Math.floor(ms/1000/60);
-  return `${m}:${s.toString().padStart(2,'0')}`;
-}
+function fmt(ms){ if(!ms)return"0:00"; const s=Math.floor(ms/1000)%60, m=Math.floor(ms/1000/60); return`${m}:${s.toString().padStart(2,'0')}`; }
 </script>
 </body>
 </html>
