@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <title>Nightwolf Entertainments Musikbot</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <style>
+    :root {
+      --bg: #050510;
+      --bg-alt: #101020;
+      --accent: #ff355e;
+      --accent-soft: rgba(255,53,94,0.18);
+      --accent-strong: rgba(255,53,94,0.45);
+      --text: #f5f5f7;
+      --text-muted: #9ca3af;
+      --border: rgba(148,163,184,0.35);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background:
+        radial-gradient(circle at top left, #1f2937 0, transparent 55%),
+        radial-gradient(circle at top right, #111827 0, transparent 55%),
+        radial-gradient(circle at bottom, #020617 0, #020617 60%);
+      color: var(--text);
+      display: flex;
+      justify-content: center;
+      align-items: flex-start;
+      padding: 24px 10px;
+    }
+    .app {
+      width: 100%;
+      max-width: 1120px;
+    }
+    .shell {
+      border-radius: 22px;
+      padding: 22px 22px 26px;
+      background: radial-gradient(circle at top, rgba(255,255,255,0.04), rgba(15,23,42,0.96));
+      border: 1px solid rgba(148,163,184,0.45);
+      box-shadow:
+        0 26px 60px rgba(0,0,0,0.8),
+        0 0 80px rgba(248,113,113,0.16);
+      backdrop-filter: blur(16px);
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .title-block {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .logo {
+      width: 40px;
+      height: 40px;
+      border-radius: 16px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background:
+        radial-gradient(circle at 30% 0, #fecaca, transparent 55%),
+        radial-gradient(circle at 80% 90%, #fb7185, #b91c1c);
+      box-shadow:
+        0 0 18px rgba(248,113,113,0.8),
+        0 0 40px rgba(59,130,246,0.6);
+      font-size: 22px;
+    }
+    h1 {
+      margin: 0;
+      font-size: 22px;
+    }
+    .subtitle {
+      margin-top: 2px;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      border: 1px solid rgba(148,163,184,0.55);
+      background: radial-gradient(circle at top left, rgba(15,23,42,0.9), rgba(15,23,42,0.96));
+    }
+    .badge-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: #ef4444;
+      box-shadow: 0 0 8px rgba(248,113,113,0.8);
+    }
+    .badge-dot.ok {
+      background: #22c55e;
+      box-shadow: 0 0 10px rgba(74,222,128,0.9);
+    }
+    main {
+      display: grid;
+      grid-template-columns: minmax(0, 320px) minmax(0, 1fr);
+      gap: 18px;
+    }
+    .card {
+      background: radial-gradient(circle at top left, rgba(15,23,42,0.95), rgba(15,23,42,1));
+      border-radius: 16px;
+      padding: 14px 14px 16px;
+      border: 1px solid rgba(148,163,184,0.4);
+    }
+    .card h2 {
+      margin: 0 0 8px;
+      font-size: 14px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text-muted);
+    }
+    label {
+      display: block;
+      margin-bottom: 4px;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+    input, select, textarea, button {
+      font-family: inherit;
+    }
+    input[type="password"],
+    input[type="text"],
+    select {
+      width: 100%;
+      padding: 8px 10px;
+      border-radius: 10px;
+      border: 1px solid rgba(148,163,184,0.7);
+      background: rgba(15,23,42,0.96);
+      color: var(--text);
+      font-size: 13px;
+      outline: none;
+    }
+    input:focus, select:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px var(--accent-strong);
+    }
+    button {
+      border-radius: 999px;
+      border: none;
+      padding: 7px 14px;
+      font-size: 13px;
+      font-weight: 500;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: linear-gradient(135deg, #fb7185, #f97316);
+      color: #fff;
+      box-shadow: 0 10px 24px rgba(248,113,113,0.7);
+    }
+    button.secondary {
+      background: transparent;
+      color: var(--text-muted);
+      border: 1px solid rgba(148,163,184,0.7);
+      box-shadow: none;
+    }
+    button:disabled {
+      opacity: 0.45;
+      cursor: default;
+      box-shadow: none;
+    }
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .row > * {
+      flex: 1;
+    }
+    .row .grow-0 {
+      flex: 0;
+    }
+    .section-spacer {
+      height: 10px;
+    }
+    .note {
+      margin-top: 6px;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .track-box {
+      margin-top: 10px;
+      padding: 10px 11px;
+      border-radius: 10px;
+      background: radial-gradient(circle at top left, var(--accent-soft), rgba(15,23,42,0.98));
+      border: 1px solid rgba(248,113,113,0.5);
+      font-size: 13px;
+    }
+    .track-title {
+      font-weight: 500;
+    }
+    .track-meta {
+      margin-top: 2px;
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .empty {
+      opacity: 0.8;
+      font-size: 12px;
+    }
+    .log-card {
+      margin-top: 18px;
+    }
+    textarea {
+      width: 100%;
+      resize: vertical;
+      min-height: 160px;
+      border-radius: 12px;
+      border: 1px solid rgba(148,163,184,0.7);
+      background: rgba(15,23,42,0.96);
+      color: var(--text);
+      font-size: 12px;
+      padding: 7px 9px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    }
+    textarea:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 1px var(--accent-strong);
+    }
+    @media (max-width: 900px) {
+      main {
+        grid-template-columns: minmax(0, 1fr);
+      }
+    }
+  </style>
+</head>
+<body>
+
+<!-- === Now Playing & Autoplay (added) === -->
+<section id="np-panel" style="margin:1rem 0;padding:1rem;border:1px solid #3b3b6b;border-radius:12px;background:rgba(20,20,45,.6)">
+  <div style="display:flex;flex-wrap:wrap;gap:1rem;align-items:end">
+    <div style="flex:2 1 300px">
+      <h3 style="margin:0 0 .4rem 0">🎶 Now Playing</h3>
+      <div id="npText" style="opacity:.9">–</div>
+    </div>
+    <div style="flex:3 1 340px">
+      <h3 style="margin:0 0 .4rem 0">▶️ Autoplay-Liste</h3>
+      <div style="display:flex;gap:.4rem;margin-bottom:.4rem">
+        <input id="apUrl" type="text" placeholder="https://youtube.com/..." style="flex:1;padding:.4rem .6rem;border-radius:8px;border:1px solid #2d2d5a;background:#0a0a1e;color:#fff">
+        <button id="apAdd">Hinzufügen</button>
+        <button id="apClear" class="danger">Leeren</button>
+      </div>
+      <ol id="apList" style="margin:.4rem 0 0 1rem;display:grid;gap:.25rem"></ol>
+    </div>
+  </div>
+</section>
+
+  <div class="app">
+    <div class="shell">
+      <header>
+        <div class="title-block">
+          <div class="logo">🎧</div>
+          <div>
+            <h1>Nightwolf Entertainments Musikbot</h1>
+            <div class="subtitle">Discord Musikbot mit Lavalink &amp; Webinterface. Server-spezifische Einstellungen bleiben lokal gespeichert.</div>
+          </div>
+        </div>
+        <div class="badge">
+          <span id="statusDot" class="badge-dot"></span>
+          <span id="statusText">Bot offline</span>
+        </div>
+      </header>
+
+      <main>
+        <section class="card">
+          <h2>Verbindung &amp; Server</h2>
+          <label for="password">Web-UI Passwort</label>
+          <div class="row">
+            <input id="password" type="password" placeholder="WEB_PASSWORD" />
+            <button id="connectBtn" class="grow-0">Verbinden</button>
+          </div>
+
+          <div class="section-spacer"></div>
+
+          <label for="serverSelect">Server</label>
+          <select id="serverSelect" disabled>
+            <option value="">– bitte verbinden –</option>
+          </select>
+
+          <div class="section-spacer"></div>
+
+          <label for="voiceSelect">Voice-Channel</label>
+          <select id="voiceSelect" disabled>
+            <option value="">– auswählen –</option>
+          </select>
+
+          <div class="section-spacer"></div>
+
+          <label for="textSelect">Steuer-Textkanal (optional)</label>
+          <select id="textSelect" disabled>
+            <option value="">– keiner –</option>
+          </select>
+
+          <div class="section-spacer"></div>
+
+          <div class="row">
+            <button id="saveSettingsBtn" class="secondary" disabled>Speichern</button>
+            <button id="reloadGuildBtn" class="secondary" disabled>Neu laden</button>
+          </div>
+
+          <p class="note">
+            Hinweis: Wähle hier den Standard-Voice-Channel und ggf. einen Textkanal,
+            in dem Befehle akzeptiert werden. Einstellungen werden lokal gespeichert.
+          </p>
+        </section>
+
+        <section class="card">
+          <h2>Player &amp; Queue</h2>
+
+          <label for="queryInput">Song suchen oder URL einfügen</label>
+          <div class="row">
+            <input id="queryInput" type="text" placeholder="YouTube, Playlist, Link ..." />
+            <button id="playBtn" class="grow-0" disabled>Play</button>
+          </div>
+
+          <div class="section-spacer"></div>
+
+          <div class="row">
+            <button id="skipBtn" class="secondary" disabled>⏭ Skip</button>
+            <button id="stopBtn" class="secondary" disabled>⏹ Stop</button>
+          </div>
+
+          <div class="track-box" id="trackBox">
+            <div class="empty">Noch kein Track gestartet.</div>
+          </div>
+        </section>
+      </main>
+
+      <section class="card log-card">
+        <div class="row" style="justify-content: space-between; align-items: center;">
+          <h2>Bot-Log</h2>
+          <button id="refreshLogBtn" class="secondary grow-0" style="font-size:12px;">Aktualisieren</button>
+        </div>
+        <textarea id="logArea" readonly></textarea>
+      </section>
+    </div>
+  </div>
+
+  <script>
+    let apiKey = null;
+    let currentGuildId = null;
+
+    function setStatus(online, tag, lavalinkReady) {
+      const dot = document.getElementById("statusDot");
+      const text = document.getElementById("statusText");
+      if (online) {
+        dot.classList.add("ok");
+        text.textContent = lavalinkReady
+          ? `Bot online (${tag || "unbekannt"}) · Lavalink verbunden`
+          : `Bot online (${tag || "unbekannt"}) · Lavalink offline`;
+      } else {
+        dot.classList.remove("ok");
+        text.textContent = "Bot offline";
+      }
+    }
+
+    async function api(path, options = {}) {
+      if (!apiKey) throw new Error("Nicht verbunden.");
+      const headers = Object.assign({}, options.headers || {}, {
+        "x-api-key": apiKey
+      });
+      if (!(options.body instanceof FormData)) {
+        headers["Content-Type"] = "application/json";
+      }
+      const res = await fetch(path, Object.assign({}, options, { headers }));
+      if (!res.ok) {
+        let msg = `HTTP ${res.status}`;
+        try {
+          const data = await res.json();
+          if (data && data.error) msg = data.error;
+        } catch {}
+        throw new Error(msg);
+      }
+      return res.json();
+    }
+
+    async function loadStatusAndGuilds() {
+      const status = await api("/api/status");
+      setStatus(status.botOnline, status.botTag, status.lavalinkReady);
+
+      const serverSelect = document.getElementById("serverSelect");
+      serverSelect.innerHTML = "";
+      if (!status.guilds || !status.guilds.length) {
+        const opt = document.createElement("option");
+        opt.value = "";
+        opt.textContent = "Bot ist auf keinem Server";
+        serverSelect.appendChild(opt);
+        serverSelect.disabled = true;
+        return;
+      }
+      const optEmpty = document.createElement("option");
+      optEmpty.value = "";
+      optEmpty.textContent = "– Server wählen –";
+      serverSelect.appendChild(optEmpty);
+
+      for (const g of status.guilds) {
+        const opt = document.createElement("option");
+        opt.value = g.id;
+        opt.textContent = `${g.name} (${g.id})`;
+        serverSelect.appendChild(opt);
+      }
+      serverSelect.disabled = false;
+    }
+
+    async function loadGuildDetails() {
+      if (!currentGuildId) return;
+      const details = await api(`/api/guilds/${currentGuildId}/details`);
+      const voiceSelect = document.getElementById("voiceSelect");
+      const textSelect = document.getElementById("textSelect");
+
+      voiceSelect.innerHTML = "<option value=''>– auswählen –</option>";
+      textSelect.innerHTML = "<option value=''>– keiner –</option>";
+
+      (details.voiceChannels || []).forEach((vc) => {
+        const opt = document.createElement("option");
+        opt.value = vc.id;
+        opt.textContent = vc.name;
+        voiceSelect.appendChild(opt);
+      });
+
+      (details.textChannels || []).forEach((tc) => {
+        const opt = document.createElement("option");
+        opt.value = tc.id;
+        opt.textContent = tc.name;
+        textSelect.appendChild(opt);
+      });
+
+      if (details.settings) {
+        if (details.settings.voiceChannelId) {
+          voiceSelect.value = details.settings.voiceChannelId;
+        }
+        if (details.settings.textChannelId) {
+          textSelect.value = details.settings.textChannelId;
+        }
+      }
+
+      voiceSelect.disabled = false;
+      textSelect.disabled = false;
+      document.getElementById("saveSettingsBtn").disabled = false;
+      document.getElementById("reloadGuildBtn").disabled = false;
+      document.getElementById("playBtn").disabled = false;
+      document.getElementById("skipBtn").disabled = false;
+      document.getElementById("stopBtn").disabled = false;
+    }
+
+    async function refreshLogs() {
+      const data = await api("/api/logs");
+      const logArea = document.getElementById("logArea");
+      logArea.value = (data.lines || []).join("\n");
+      logArea.scrollTop = logArea.scrollHeight;
+    }
+
+    function setTrackBox(track) {
+      const box = document.getElementById("trackBox");
+      box.innerHTML = "";
+      if (!track) {
+        const div = document.createElement("div");
+        div.className = "empty";
+        div.textContent = "Noch kein Track gestartet.";
+        box.appendChild(div);
+        return;
+      }
+      const title = document.createElement("div");
+      title.className = "track-title";
+      title.textContent = track.title || "Unbekannter Titel";
+      const meta = document.createElement("div");
+      meta.className = "track-meta";
+      meta.textContent = track.author
+        ? `${track.author}${track.length ? " · " + formatMs(track.length) : ""}`
+        : track.length
+        ? formatMs(track.length)
+        : "";
+      box.appendChild(title);
+      box.appendChild(meta);
+    }
+
+    function formatMs(ms) {
+      const totalSec = Math.floor(ms / 1000);
+      const m = Math.floor(totalSec / 60);
+      const s = totalSec % 60;
+      const h = Math.floor(m / 60);
+      const mm = m % 60;
+      if (h > 0) {
+        return `${h}:${String(mm).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+      }
+      return `${mm}:${String(s).padStart(2, "0")}`;
+    }
+
+    document.getElementById("connectBtn").addEventListener("click", async () => {
+      const pwd = document.getElementById("password").value.trim();
+      if (!pwd) {
+        alert("Bitte Passwort eingeben.");
+        return;
+      }
+      apiKey = pwd;
+      try {
+        await loadStatusAndGuilds();
+        await refreshLogs();
+      } catch (err) {
+        console.error(err);
+        apiKey = null;
+        setStatus(false);
+        alert("Login fehlgeschlagen: " + err.message);
+      }
+    });
+
+    document.getElementById("serverSelect").addEventListener("change", async (e) => {
+      currentGuildId = e.target.value || null;
+      if (!currentGuildId) {
+        document.getElementById("voiceSelect").disabled = true;
+        document.getElementById("textSelect").disabled = true;
+        document.getElementById("saveSettingsBtn").disabled = true;
+        document.getElementById("reloadGuildBtn").disabled = true;
+        document.getElementById("playBtn").disabled = true;
+        document.getElementById("skipBtn").disabled = true;
+        document.getElementById("stopBtn").disabled = true;
+        setTrackBox(null);
+        return;
+      }
+      try {
+        await loadGuildDetails();
+      } catch (err) {
+        console.error(err);
+        alert("Fehler beim Laden der Serverdaten: " + err.message);
+      }
+    });
+
+    document.getElementById("reloadGuildBtn").addEventListener("click", async () => {
+      try {
+        await loadGuildDetails();
+      } catch (err) {
+        console.error(err);
+        alert("Fehler beim Neuladen der Daten: " + err.message);
+      }
+    });
+
+    document.getElementById("saveSettingsBtn").addEventListener("click", async () => {
+      if (!currentGuildId) return;
+      const voiceChannelId = document.getElementById("voiceSelect").value || "";
+      const textChannelId = document.getElementById("textSelect").value || "";
+      try {
+        await api(`/api/guilds/${currentGuildId}/settings`, {
+          method: "POST",
+          body: JSON.stringify({ voiceChannelId, textChannelId })
+        });
+        alert("Einstellungen gespeichert.");
+      } catch (err) {
+        console.error(err);
+        alert("Fehler beim Speichern: " + err.message);
+      }
+    });
+
+    document.getElementById("playBtn").addEventListener("click", async () => {
+      if (!currentGuildId) return;
+      const query = document.getElementById("queryInput").value.trim();
+      if (!query) {
+        alert("Bitte einen Suchbegriff oder Link eingeben.");
+        return;
+      }
+      try {
+        const res = await api(`/api/guilds/${currentGuildId}/play`, {
+          method: "POST",
+          body: JSON.stringify({ query })
+        });
+        if (res.track) setTrackBox(res.track);
+        document.getElementById("queryInput").value = "";
+        await refreshLogs();
+      } catch (err) {
+        console.error(err);
+        alert("Fehler beim Abspielen: " + err.message);
+      }
+    });
+
+    document.getElementById("skipBtn").addEventListener("click", async () => {
+      if (!currentGuildId) return;
+      try {
+        await api(`/api/guilds/${currentGuildId}/skip`, { method: "POST" });
+        await refreshLogs();
+      } catch (err) {
+        console.error(err);
+        alert("Fehler beim Skip: " + err.message);
+      }
+    });
+
+    document.getElementById("stopBtn").addEventListener("click", async () => {
+      if (!currentGuildId) return;
+      try {
+        await api(`/api/guilds/${currentGuildId}/stop`, { method: "POST" });
+        setTrackBox(null);
+        await refreshLogs();
+      } catch (err) {
+        console.error(err);
+        alert("Fehler beim Stop: " + err.message);
+      }
+    });
+
+    document.getElementById("refreshLogBtn").addEventListener("click", () => {
+      refreshLogs().catch((e) => console.error(e));
+    });
+  </script>
+
+<script>
+(async function(){
+  function gid() {
+    const el = document.querySelector('#guildSelect, #guildId, [data-guild-id]'); 
+    const manual = document.getElementById('guildId');
+    if (manual && manual.value.trim()) return manual.value.trim();
+    if (el && el.value) return el.value;
+    if (el && el.dataset && el.dataset.guildId) return el.dataset.guildId;
+    return null;
+  }
+  async function j(url, opt){ const r=await fetch(url, Object.assign({headers:{'Content-Type':'application/json'}},opt||{})); if(!r.ok) throw new Error(await r.text()); return r.json(); }
+  async function refreshNP(){
+    const g = gid(); if(!g) return;
+    try{
+      const data = await j('/api/np?guildId='+encodeURIComponent(g));
+      const t = data.nowPlaying;
+      document.getElementById('npText').textContent = t ? (t.title + (t.uri ? ' — ' + t.uri : '')) : '–';
+    }catch(e){ console.warn('np', e); }
+  }
+  async function loadAP(){
+    const g = gid(); if(!g) return;
+    try{
+      const data = await j('/api/autoplay/'+encodeURIComponent(g));
+      const list = data.autoplaylist || [];
+      const ol = document.getElementById('apList'); ol.innerHTML = '';
+      list.forEach((u,i)=>{
+        const li = document.createElement('li');
+        li.textContent = (i+1)+'. '+u+' ';
+        const b = document.createElement('button'); b.textContent='X'; b.className='danger';
+        b.onclick=()=>removeAP(i+1);
+        li.appendChild(b);
+        ol.appendChild(li);
+      });
+    }catch(e){ console.warn('ap list', e); }
+  }
+  async function addAP(){
+    const g = gid(); if(!g) return;
+    const url = document.getElementById('apUrl').value.trim(); if(!url) return;
+    await j('/api/autoplay/'+encodeURIComponent(g)+'/add', { method:'POST', body: JSON.stringify({url})});
+    document.getElementById('apUrl').value='';
+    loadAP();
+  }
+  async function removeAP(idx){
+    const g = gid(); if(!g) return;
+    await j('/api/autoplay/'+encodeURIComponent(g)+'/remove', { method:'POST', body: JSON.stringify({index: idx})});
+    loadAP();
+  }
+  async function clearAP(){
+    const g = gid(); if(!g) return;
+    await j('/api/autoplay/'+encodeURIComponent(g)+'/clear', { method:'POST', body: JSON.stringify({})});
+    loadAP();
+  }
+  document.getElementById('apAdd')?.addEventListener('click', addAP);
+  document.getElementById('apClear')?.addEventListener('click', clearAP);
+
+  setInterval(refreshNP, 5000);
+  setInterval(loadAP, 8000);
+  refreshNP(); loadAP();
+})();</script>
+
+</body>
+</html>
