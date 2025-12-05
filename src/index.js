@@ -457,6 +457,28 @@ app.get("/api/np", (req, res) => {
   });
 });
 
+// --------- AUTOPLAY API (DAS HAT GEFEHLT!) ---------
+app.get("/api/autoplay/:guildId", auth, (req, res) => {
+  const s = ensureGuildSettings(req.params.guildId);
+  res.json({ list: s.autoplaylist || [] });
+});
+
+app.post("/api/autoplay/:guildId/add", auth, (req, res) => {
+  const s = ensureGuildSettings(req.params.guildId);
+  if (req.body.url) s.autoplaylist.push(req.body.url.trim());
+  scheduleSaveGuildSettings();
+  res.json({ list: s.autoplaylist });
+});
+
+app.post("/api/autoplay/:guildId/clear", auth, (req, res) => {
+  const s = ensureGuildSettings(req.params.guildId);
+  s.autoplaylist = [];
+  scheduleSaveGuildSettings();
+  res.json({ list: [] });
+});
+
+// ... (Restlicher Code: app.get("/api/logs"...)
+
 app.get("/api/logs", auth, (req, res) => res.json({ lines: logBuffer }));
 app.get("*", (req, res) => res.sendFile(path.join(__dirname, "..", "public", "index.html")));
 
