@@ -1,0 +1,19 @@
+FROM debian:bookworm-slim
+
+ENV JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64
+ENV PATH=$JAVA_HOME/bin:$PATH
+
+RUN apt-get update && \
+    apt-get install -y openjdk-17-jre-headless curl && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/Lavalink
+
+RUN curl -L -o Lavalink.jar https://github.com/lavalink-devs/Lavalink/releases/download/4.0.8/Lavalink.jar
+
+COPY application.yml /opt/Lavalink/application.yml
+
+EXPOSE 2333
+
+ENTRYPOINT ["java", "-jar", "Lavalink.jar"]
