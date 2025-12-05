@@ -1,20 +1,19 @@
 version: '3.8'
 
 services:
-  # --- Lavalink (Server) ---
+  # --- Service 1: Lavalink (Server) ---
   lavalink:
     build:
       context: .
       dockerfile: Dockerfile.lavalink
     container_name: lavalink-unified
     restart: always
-environment:
+    environment:
       - _JAVA_OPTIONS=-Xmx2G
       - SERVER_PORT=2333
       - LAVALINK_SERVER_PASSWORD=${LAVALINK_SERVER_PASSWORD}
       - PO_TOKEN=${PO_TOKEN}
       - PO_VISITOR_DATA=${PO_VISITOR_DATA}
-      # NEU: Spotify Variablen an Lavalink übergeben
       - SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID}
       - SPOTIFY_CLIENT_SECRET=${SPOTIFY_CLIENT_SECRET}
     volumes:
@@ -24,7 +23,7 @@ environment:
     networks:
       - musicnet
 
-  # --- Musicbot (Client) ---
+  # --- Service 2: Musicbot (Client) ---
   musicbot:
     build: .
     container_name: musicbot-unified
@@ -35,7 +34,7 @@ environment:
       - DISCORD_TOKEN=${DISCORD_TOKEN}
       - LAVALINK_HOST=lavalink
       - LAVALINK_PORT=2333
-      - LAVALINK_PASSWORD=${LAVALINK_SERVER_PASSWORD} # Nutzt das gleiche PW wie oben
+      - LAVALINK_PASSWORD=${LAVALINK_SERVER_PASSWORD}
     depends_on:
       - lavalink
     networks:
