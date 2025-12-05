@@ -313,25 +313,33 @@ client.on("messageCreate", async (message) => {
   } catch (e) { message.reply("Fehler: " + e.message); }
 });
 
-// Slash Commands & Buttons (bleibt gleich wie vorher)
+// --------- SLASH & BUTTONS ---------
 client.on("interactionCreate", async (interaction) => {
+  // Buttons (Embed)
   if (interaction.isButton()) {
     const player = client.lavalink.getPlayer(interaction.guildId);
-    if (!player) return interaction.reply({ content: "Kein Player.", ephemeral: true });
+    if (!player) return interaction.reply({ content: "Kein Player aktiv.", ephemeral: true });
     
+    // Check Voice
     if(interaction.member.voice.channelId !== player.voiceChannelId) 
        return interaction.reply({content:"Falscher Channel!", ephemeral:true});
 
     if (interaction.customId === "pause") {
-      await player.pause(!player.paused);
-      await interaction.update({ components: [createPlayerButtons(player.paused)] });
-    } else if (interaction.customId === "skip") {
+      // FIX: Wir merken uns den neuen Status (Gegenteil von jetzt)
+      const neuerStatus = !player.paused;
+      await player.pause(neuerStatus);
+      // Wir zwingen den Button, den neuen Status anzuzeigen
+      await interaction.update({ components: [createPlayerButtons(neuerStatus)] });
+    } 
+    else if (interaction.customId === "skip") {
       await player.skip();
-      await interaction.reply({ content: "Skipped.", ephemeral: true });
-    } else if (interaction.customId === "stop") {
+      await interaction.reply({ content: "⏭️ Übersprungen.", ephemeral: true });
+    } 
+    else if (interaction.customId === "stop") {
       await player.stop(); player.queue.clear();
-      await interaction.update({ content: "Stopped.", components: [] });
-    } else if (interaction.customId === "list") {
+      await interaction.update({ content: "⏹️ Gestoppt.", components: [] });
+    } 
+    else if (interaction.customId === "list") {
       const q = player.queue.tracks.map((t,i)=>`${i+1}. ${t.info.title}`).join("\n").substr(0,1000)||"Leer";
       await interaction.reply({ content: `**Queue:**\n${q}`, ephemeral: true });
     }
