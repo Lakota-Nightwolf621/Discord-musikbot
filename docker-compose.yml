@@ -35,6 +35,7 @@ services:
       - LAVALINK_HOST=lavalink
       - LAVALINK_PORT=2333
       - LAVALINK_PASSWORD=${LAVALINK_SERVER_PASSWORD}
+      - WEB_PASSWORD=${WEB_PASSWORD}
     depends_on:
       - lavalink
     networks:
