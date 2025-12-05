@@ -8,13 +8,15 @@ services:
       dockerfile: Dockerfile.lavalink
     container_name: lavalink-unified
     restart: always
-    environment:
+environment:
       - _JAVA_OPTIONS=-Xmx2G
       - SERVER_PORT=2333
-      # Hier holen wir die Werte aus Portainer und geben sie an Lavalink weiter:
       - LAVALINK_SERVER_PASSWORD=${LAVALINK_SERVER_PASSWORD}
       - PO_TOKEN=${PO_TOKEN}
       - PO_VISITOR_DATA=${PO_VISITOR_DATA}
+      # NEU: Spotify Variablen an Lavalink übergeben
+      - SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID}
+      - SPOTIFY_CLIENT_SECRET=${SPOTIFY_CLIENT_SECRET}
     volumes:
       - lavalink-plugins:/opt/Lavalink/plugins
     expose:
