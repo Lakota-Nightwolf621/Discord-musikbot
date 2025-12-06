@@ -1,7 +1,7 @@
 version: '3.8'
 
 services:
-  # --- Service 1: Lavalink (Server) ---
+# --- Service 1: Lavalink (Server) ---
   lavalink:
     build:
       context: .
@@ -23,7 +23,7 @@ services:
     networks:
       - musicnet
 
-  # --- Service 2: Musicbot (Client) ---
+# --- Service 2: Musicbot (Client) ---
    musicbot:
     build: .
     container_name: musicbot
