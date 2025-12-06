@@ -65,6 +65,7 @@ function loadGuildSettings() {
     }
   } catch (err) { addLog("[config] Fehler beim Laden."); }
 }
+
 loadGuildSettings();
 
 function scheduleSaveGuildSettings() {
@@ -106,7 +107,7 @@ function createNowPlayingEmbed(track, player, status = "Spielt gerade") {
      const idx = Math.floor(pct * 15);
      if (idx >= 0 && idx < 15) slider[idx] = "🔘";
   }
-  return new EmbedBuilder()
+   return new EmbedBuilder()
     .setColor(0xff0033)
     .setTitle("🎶 " + status)
     .setDescription(`**[${track.info.title}](${track.info.uri})**\nby ${track.info.author}`)
