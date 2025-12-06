@@ -6,7 +6,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.lavalink
-    container_name:lavalinl
+    container_name:lavalink
     restart: always
     environment:
       - _JAVA_OPTIONS=-Xmx4G
