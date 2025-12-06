@@ -27,7 +27,7 @@ const LAVALINK_HOST = process.env.LAVALINK_HOST || "lavalink";
 const LAVALINK_PORT = Number(process.env.LAVALINK_PORT || 2333);
 const LAVALINK_PASSWORD = process.env.LAVALINK_PASSWORD || "youshallnotpass";
 const LAVALINK_ID = process.env.LAVALINK_ID || "main";
-const WEB_PORT = Number(process.env.PORT || 8080);
+const WEB_PORT = Number(process.env.PORT || 8081);
 
 if (!DISCORD_TOKEN) console.warn("[WARN] DISCORD_TOKEN fehlt!");
 
