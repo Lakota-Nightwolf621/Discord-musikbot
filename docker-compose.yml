@@ -24,7 +24,7 @@ services:
       - musicnet
 
   # --- Service 2: Musicbot (Client) ---
-  musicbot:
+   musicbot:
     build: .
     container_name: musicbot
     restart: always
@@ -36,10 +36,12 @@ services:
       - LAVALINK_PORT=2333
       - LAVALINK_PASSWORD=youshallnotpass
       - WEB_PASSWORD=${WEB_PASSWORD}
+    command: ["node", "src/index.js"]
     depends_on:
       - lavalink
     networks:
       - musicnet
+
 
 volumes:
   lavalink-plugins:
