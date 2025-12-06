@@ -6,12 +6,12 @@ services:
     build:
       context: .
       dockerfile: Dockerfile.lavalink
-    container_name: lavalink-unified
+    container_name:
     restart: always
     environment:
-      - _JAVA_OPTIONS=-Xmx2G
+      - _JAVA_OPTIONS=-Xmx4G
       - SERVER_PORT=2333
-      - LAVALINK_SERVER_PASSWORD=${LAVALINK_SERVER_PASSWORD}
+      - LAVALINK_SERVER_PASSWORD=youshallnotpass
       - PO_TOKEN=${PO_TOKEN}
       - PO_VISITOR_DATA=${PO_VISITOR_DATA}
       - SPOTIFY_CLIENT_ID=${SPOTIFY_CLIENT_ID}
@@ -26,7 +26,7 @@ services:
   # --- Service 2: Musicbot (Client) ---
   musicbot:
     build: .
-    container_name: musicbot-unified
+    container_name: musicbot
     restart: always
     ports:
       - "8081:8081"
@@ -34,7 +34,7 @@ services:
       - DISCORD_TOKEN=${DISCORD_TOKEN}
       - LAVALINK_HOST=lavalink
       - LAVALINK_PORT=2333
-      - LAVALINK_PASSWORD=${LAVALINK_PASSWORD}
+      - LAVALINK_PASSWORD=youshallnotpass
       - WEB_PASSWORD=${WEB_PASSWORD}
     depends_on:
       - lavalink
