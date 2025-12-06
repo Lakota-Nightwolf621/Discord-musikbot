@@ -1,7 +1,8 @@
 // index.js
 // Minimaler Hauptprozess: Config, Lavalink, Persistenz, Web API.
 // Alle Commands / Interactions / Embeds sind ausgelagert in message.js
-
+const registerMessageHandlers = require("./message");
+const { commands } = require("./commands"); // optional, falls du in index.js Slash-Registration willst
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
