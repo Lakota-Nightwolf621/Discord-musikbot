@@ -193,6 +193,11 @@ client.lavalink.on("queueEnd", async (player) => {
   }
 });
 
+// Lavalink node lifecycle logging
+client.lavalink.on('nodeConnect', node => addLog(`[lavalink] Node connected: ${node.id}`));
+client.lavalink.on('nodeDisconnect', (node, reason) => addLog(`[lavalink] Node disconnected: ${node?.id} reason=${reason}`));
+client.lavalink.on('nodeError', (node, err) => addLog(`[lavalink] Node error: ${node?.id} ${err?.stack || err?.message || err}`));
+
 // --------- 7. DISCORD COMMANDS (Prefix & Slash & Buttons) ---------
 client.on("interactionCreate", async (interaction) => {
   if (interaction.isButton()) {
