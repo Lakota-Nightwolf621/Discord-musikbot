@@ -353,3 +353,18 @@ async function start() {
     try { await rest.put(Routes.applicationCommands(client.user.id), { body: cmd }); } catch(e){}
 }
 start();
+
+process.on('SIGTERM', async () => {
+  console.log('SIGTERM empfangen, fahre herunter...');
+  try { await client.destroy(); } catch(e) { console.error(e); }
+  process.exit(0);
+});
+process.on('SIGINT', async () => {
+  console.log('SIGINT empfangen, fahre herunter...');
+  try { await client.destroy(); } catch(e) { console.error(e); }
+  process.exit(0);
+});
+process.on('uncaughtException', err => {
+  console.error('Uncaught Exception:', err);
+  process.exit(1);
+});
