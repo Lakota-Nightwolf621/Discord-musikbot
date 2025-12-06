@@ -29,12 +29,12 @@ services:
     container_name: musicbot-unified
     restart: always
     ports:
-      - "8080:8080"
+      - "8081:8081"
     environment:
       - DISCORD_TOKEN=${DISCORD_TOKEN}
       - LAVALINK_HOST=lavalink
       - LAVALINK_PORT=2333
-      - LAVALINK_PASSWORD=${LAVALINK_SERVER_PASSWORD}
+      - LAVALINK_PASSWORD=${LAVALINK_PASSWORD}
       - WEB_PASSWORD=${WEB_PASSWORD}
     depends_on:
       - lavalink
