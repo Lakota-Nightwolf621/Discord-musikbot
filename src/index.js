@@ -1,5 +1,7 @@
+// index.js
 const path = require("path");
 const fs = require("fs");
+const os = require("os");
 const express = require("express");
 const bodyParser = require("body-parser");
 const cors = require("cors");
@@ -11,11 +13,14 @@ const {
   Routes,
   SlashCommandBuilder,
   ChannelType,
-  EmbedBuilder
+  EmbedBuilder,
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle
 } = require("discord.js");
 const { LavalinkManager } = require("lavalink-client");
 
-// --------- ENV ---------
+// --------- ENV / KONFIGURATION ---------
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN || "";
 const WEB_PASSWORD = process.env.WEB_PASSWORD || "changeme";
 const COMMAND_PREFIX = process.env.COMMAND_PREFIX || "!";
@@ -23,9 +28,111 @@ const LAVALINK_HOST = process.env.LAVALINK_HOST || "lavalink";
 const LAVALINK_PORT = Number(process.env.LAVALINK_PORT || 2333);
 const LAVALINK_PASSWORD = process.env.LAVALINK_PASSWORD || "youshallnotpass";
 const LAVALINK_ID = process.env.LAVALINK_ID || "main";
-const WEB_PORT = Number(process.env.PORT || 8080);
+const WEB_PORT = Number(process.env.PORT || 8081);
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "..", "data");
+const SETTINGS_FILE = process.env.SETTINGS_FILE || path.join(DATA_DIR, "guild-settings.json");
 
-// --------- HELP EMBED ---------
+if (!DISCORD_TOKEN) console.warn("[WARN] DISCORD_TOKEN fehlt!");
+
+// --------- LOGGING ---------
+const logBuffer = [];
+const MAX_LOG_LINES = 500;
+function addLog(message) {
+  const line = `[${new Date().toISOString()}] ${message}`;
+  console.log(line);
+  logBuffer.push(line);
+  if (logBuffer.length > MAX_LOG_LINES) logBuffer.shift();
+}
+
+// --------- SETTINGS PERSISTENZ ---------
+if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+
+const guildSettings = new Map();
+function ensureGuildSettings(gid) {
+  const current = guildSettings.get(gid) || {};
+  if (typeof current.volume !== "number") current.volume = 100;
+  if (!Array.isArray(current.autoplaylist)) current.autoplaylist = [];
+  if (typeof current.autoplayIndex !== "number") current.autoplayIndex = 0;
+  guildSettings.set(gid, current);
+  return current;
+}
+
+function loadGuildSettings() {
+  try {
+    if (fs.existsSync(SETTINGS_FILE)) {
+      const raw = fs.readFileSync(SETTINGS_FILE, "utf8");
+      if (!raw) return;
+      const obj = JSON.parse(raw);
+      for (const [gid, val] of Object.entries(obj)) {
+        guildSettings.set(gid, val);
+      }
+      addLog(`[config] Settings geladen.`);
+    } else {
+      addLog("[config] Keine gespeicherten Settings gefunden.");
+    }
+  } catch (err) {
+    addLog("[config] Fehler beim Laden der Settings: " + (err && err.message));
+  }
+}
+loadGuildSettings();
+
+let saveTimeout = null;
+function scheduleSaveGuildSettings() {
+  if (saveTimeout) clearTimeout(saveTimeout);
+  saveTimeout = setTimeout(() => {
+    try {
+      const obj = {};
+      for (const [gid, val] of guildSettings.entries()) obj[gid] = val;
+      fs.writeFileSync(SETTINGS_FILE, JSON.stringify(obj, null, 2), "utf8");
+      addLog("[config] Server-Settings gespeichert.");
+    } catch (err) {
+      addLog("[config] Fehler beim Speichern der Settings: " + (err && err.message));
+    }
+  }, 1000);
+}
+
+// --------- RUNTIME STATE (Autoplay / NowPlaying) ---------
+const runtimeState = new Map();
+function ensureRuntime(gid) {
+  let rt = runtimeState.get(gid);
+  if (!rt) {
+    rt = { current: null, autoplayPending: false, isAutoplayCurrent: false };
+    runtimeState.set(gid, rt);
+  }
+  return rt;
+}
+
+// --------- DISCORD + LAVALINK SETUP ---------
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.GuildVoiceStates,
+    GatewayIntentBits.MessageContent
+  ],
+  partials: [Partials.Channel],
+});
+
+client.lavalink = new LavalinkManager({
+  nodes: [
+    { authorization: LAVALINK_PASSWORD, host: LAVALINK_HOST, port: LAVALINK_PORT, id: LAVALINK_ID }
+  ],
+  sendToShard: (guildId, payload) => client.guilds.cache.get(guildId)?.shard?.send(payload),
+  autoSkip: true,
+  client: { id: "0", username: "MusicBot" },
+  playerOptions: { defaultSearchPlatform: "ytmsearch", volumeDecrementer: 0.75, clientBasedPositionUpdateInterval: 150 },
+});
+
+client.on("raw", (d) => client.lavalink.sendRawData(d));
+
+// Lavalink node lifecycle logging
+let lavalinkReady = false;
+client.lavalink.on('nodeConnect', node => { lavalinkReady = true; addLog(`[lavalink] Node connected: ${node.id}`); });
+client.lavalink.on('nodeDisconnect', (node, reason) => { lavalinkReady = false; addLog(`[lavalink] Node disconnected: ${node?.id} reason=${reason}`); });
+client.lavalink.on('nodeError', (node, err) => { addLog(`[lavalink] Node error: ${node?.id} ${err?.message || err}`); });
+client.lavalink.on('debug', msg => addLog(`[lavalink-debug] ${msg}`));
+
+// --------- HELP EMBED (aus backup.js) ---------
 function createHelpEmbed() {
   return new EmbedBuilder()
     .setTitle("🎵 Musikbot – Hilfe")
@@ -48,7 +155,7 @@ function createHelpEmbed() {
           "`/autoplay clear` – Leert die Autoplayliste.",
           "`/about` – Infos über den Bot.",
           "`/help` – Zeigt dieses Hilfe-Embed."
-        ].join("\\n"),
+        ].join("\n"),
       },
       {
         name: "Prefix-Befehle",
@@ -67,101 +174,25 @@ function createHelpEmbed() {
           `\`${COMMAND_PREFIX}autoplay clear\`,`,
           `\`${COMMAND_PREFIX}about\` – Infos über den Bot.`,
           `\`${COMMAND_PREFIX}help\` – Zeigt dieses Hilfe-Embed.`
-        ].join("\\n"),
+        ].join("\n"),
       }
     )
     .setColor(0x5865f2);
 }
 
-
-
-if (!DISCORD_TOKEN) {
-  console.warn("[WARN] DISCORD_TOKEN ist nicht gesetzt. Der Bot kann sich nicht einloggen.");
+// --------- PLAYER HELPERS (aus index.js + backup.js) ---------
+async function getOrCreatePlayer(guild, voiceChannelId, textChannelId) {
+  const player = await client.lavalink.createPlayer({
+    guildId: guild.id,
+    voiceChannelId,
+    textChannelId,
+    selfDeaf: true,
+    selfMute: false,
+  });
+  if (!player.connected) await player.connect();
+  return player;
 }
 
-// --------- LOGGING ---------
-const logBuffer = [];
-const MAX_LOG_LINES = 500;
-
-function addLog(message) {
-  const line = `[${new Date().toISOString()}] ${message}`;
-  console.log(line);
-  logBuffer.push(line);
-  if (logBuffer.length > MAX_LOG_LINES) logBuffer.shift();
-}
-
-// --------- GUILD SETTINGS PERSISTENZ ---------
-const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "..", "data");
-const SETTINGS_FILE = process.env.SETTINGS_FILE || path.join(DATA_DIR, "guild-settings.json");
-
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-}
-
-const guildSettings = new Map();
-
-function ensureGuildSettings(gid) {
-  const current = guildSettings.get(gid) || {};
-  if (typeof current.volume !== "number") current.volume = 100;
-  if (!Array.isArray(current.autoplaylist)) current.autoplaylist = [];
-  if (typeof current.autoplayIndex !== "number") current.autoplayIndex = 0;
-  guildSettings.set(gid, current);
-  return current;
-}
-
- // guildId -> { textChannelId, voiceChannelId }
-
-function loadGuildSettings() {
-  try {
-    if (!fs.existsSync(SETTINGS_FILE)) {
-      addLog("[config] Keine gespeicherten Settings gefunden.");
-      return;
-    }
-    const raw = fs.readFileSync(SETTINGS_FILE, "utf8");
-    if (!raw) return;
-    const obj = JSON.parse(raw);
-    const entries = Object.entries(obj);
-    for (const [gid, val] of entries) {
-      if (val && typeof val === "object") {
-        guildSettings.set(gid, {
-          textChannelId: val.textChannelId || null,
-          voiceChannelId: val.voiceChannelId || null,
-          volume: typeof val.volume === "number" ? val.volume : 100,
-        });
-      }
-    }
-    addLog(`[config] ${guildSettings.size} Server-Settings geladen.`);
-  } catch (err) {
-    addLog("[config] Fehler beim Laden der Settings: " + err.message);
-  }
-}
-
-let saveTimeout = null;
-function scheduleSaveGuildSettings() {
-  if (saveTimeout) clearTimeout(saveTimeout);
-  saveTimeout = setTimeout(() => {
-    try {
-      const obj = {};
-      for (const [gid, val] of guildSettings.entries()) {
-        obj[gid] = val;
-      }
-      fs.writeFileSync(SETTINGS_FILE, JSON.stringify(obj, null, 2), "utf8");
-      addLog("[config] Server-Settings gespeichert.");
-    } catch (err) {
-      addLog("[config] Fehler beim Speichern der Settings: " + err.message);
-    }
-  }, 1000);
-}
-
-loadGuildSettings();
-
-// ---- Runtime state for autoplay & now playing ----
-const runtimeState = new Map();
-function ensureRuntime(gid) {
-  let rt = runtimeState.get(gid);
-  if (!rt) { rt = { current: null, autoplayPending: false, isAutoplayCurrent: false }; runtimeState.set(gid, rt); }
-  return rt;
-}
 async function playAutoplayNext(guildId) {
   const settings = ensureGuildSettings(guildId);
   const list = settings.autoplaylist || [];
@@ -179,14 +210,13 @@ async function playAutoplayNext(guildId) {
   if (!player.playing && !player.paused) { await player.play(); }
   return true;
 }
+
 async function interruptAutoplayForUser(guildId) {
   const player = client.lavalink.getPlayer(guildId);
   if (!player) return;
   const rt = ensureRuntime(guildId);
   if (rt.isAutoplayCurrent) { try { await player.stop(); } catch {} }
 }
-
-
 
 function getGuildVolume(guildId) {
   const s = ensureGuildSettings(guildId);
@@ -209,64 +239,62 @@ async function applyGuildVolume(guildId) {
   try { await p.setVolume(vol); } catch {}
 }
 
+// --------- LIVE UPDATE LOOP (Now Playing Embeds) ---------
+const playerMessages = new Map();
+function formatMs(ms) {
+  if (!ms) return "0:00";
+  const s = Math.floor(ms / 1000) % 60;
+  const m = Math.floor(ms / 1000 / 60);
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+function createNowPlayingEmbed(track, player, status = "Spielt gerade") {
+  const slider = "▬".repeat(15).split("");
+  if (track.info.length > 0) {
+    const pct = Math.min(player.position / track.info.length, 1);
+    const idx = Math.floor(pct * 15);
+    if (idx >= 0 && idx < 15) slider[idx] = "🔘";
+  }
+  return new EmbedBuilder()
+    .setColor(0xff0033)
+    .setTitle("🎶 " + status)
+    .setDescription(`**[${track.info.title}](${track.info.uri})**\nby ${track.info.author}`)
+    .addFields(
+      { name: "Zeit", value: `\`${formatMs(player.position)} / ${formatMs(track.info.length)}\``, inline: true },
+      { name: "Volume", value: `\`${player.volume}%\``, inline: true },
+      { name: "Fortschritt", value: slider.join(""), inline: false }
+    )
+    .setThumbnail(track.info.artworkUrl || null)
+    .setFooter({ text: "Nightwolf Entertainments", iconURL: client.user?.displayAvatarURL() });
+}
+function createButtons(paused) {
+  return new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId("pause").setLabel(paused ? "▶️ Weiter" : "⏸️ Pause").setStyle(paused ? ButtonStyle.Success : ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId("skip").setLabel("⏭️ Skip").setStyle(ButtonStyle.Primary),
+    new ButtonBuilder().setCustomId("stop").setLabel("⏹️ Stop").setStyle(ButtonStyle.Danger),
+    new ButtonBuilder().setCustomId("list").setLabel("📜 Queue").setStyle(ButtonStyle.Secondary)
+  );
+}
 
+setInterval(() => {
+  for (const [guildId, message] of playerMessages.entries()) {
+    try {
+      const player = client.lavalink.getPlayer(guildId);
+      if (!player || !player.queue.current) continue;
+      const embed = createNowPlayingEmbed(player.queue.current, player, player.paused ? "Pausiert" : "Spielt gerade");
+      message.edit({ embeds: [embed], components: [createButtons(player.paused)] }).catch(err => {
+        if (err && err.code === 10008) playerMessages.delete(guildId);
+      });
+    } catch (e) {}
+  }
+}, 5000);
 
-// --------- DISCORD + LAVALINK ---------
-const client = new Client({
-  intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.GuildVoiceStates,
-    GatewayIntentBits.MessageContent,
-  ],
-  partials: [Partials.Channel],
-});
-
-let lavalinkReady = false;
-
-client.lavalink = new LavalinkManager({
-  nodes: [
-    {
-      authorization: LAVALINK_PASSWORD,
-      host: LAVALINK_HOST,
-      port: LAVALINK_PORT,
-      id: LAVALINK_ID,
-    },
-  ],
-  sendToShard: (guildId, payload) =>
-    client.guilds.cache.get(guildId)?.shard?.send(payload),
-  autoSkip: true,
-  client: {
-    id: "0", // wird beim init überschrieben
-    username: "MusicBot",
-  },
-  playerOptions: {
-    defaultSearchPlatform: "ytmsearch",
-    volumeDecrementer: 0.75,
-    clientBasedPositionUpdateInterval: 150,
-  },
-});
-
-client.on("raw", (d) => client.lavalink.sendRawData(d));
-
-client.lavalink.on("nodeConnect", (node) => {
-  lavalinkReady = true;
-  addLog(`[lavalink] Node verbunden: ${node.id}`);
-});
-
-client.lavalink.on("nodeDisconnect", (node) => {
-  lavalinkReady = false;
-  addLog(`[lavalink] Node getrennt: ${node.id}`);
-});
-
+// --------- LAVALINK EVENTS (trackStart / queueEnd) ---------
 client.lavalink.on("trackStart", async (player, track) => {
   const rt = ensureRuntime(player.guildId);
   rt.current = { title: track.info?.title, uri: track.info?.uri };
   rt.isAutoplayCurrent = !!rt.autoplayPending;
   rt.autoplayPending = false;
-  addLog(
-    `[player ${player.guildId}] Starte Track: ${track.info.title} (${track.info.uri})`
-  );
+  addLog(`[player ${player.guildId}] Starte Track: ${track.info.title} (${track.info.uri})`);
   await applyGuildVolume(player.guildId);
 });
 
@@ -276,143 +304,40 @@ client.lavalink.on("queueEnd", async (player) => {
   if (settings.autoplaylist && settings.autoplaylist.length) {
     try { await playAutoplayNext(player.guildId); } catch (e) { addLog(`[autoplay] Fehler: ${e.message}`); }
   }
-});
-
-client.once("ready", async () => {
-  addLog(`[discord] Eingeloggt als ${client.user.tag}`);
-  await client.lavalink.init({ id: client.user.id, username: client.user.username });
-  addLog("[discord] Slash-Commands registrieren...");
-  await registerSlashCommands();
-});
-
-
-async function registerSlashCommands() {
-  try {
-    const commands = [
-      new SlashCommandBuilder()
-        .setName("play")
-        .setDescription("Spielt einen Song oder fügt ihn zur Queue hinzu.")
-        .addStringOption((opt) =>
-          opt
-            .setName("query")
-            .setDescription("YouTube-Link oder Suchbegriff")
-            .setRequired(true)
-        ),
-      new SlashCommandBuilder()
-        .setName("skip")
-        .setDescription("Überspringt den aktuellen Song."),
-      new SlashCommandBuilder()
-        .setName("stop")
-        .setDescription("Stoppt die Wiedergabe und leert die Queue."),
-      new SlashCommandBuilder()
-        .setName("leave")
-        .setDescription("Verlässt den Voice-Channel."),
-      new SlashCommandBuilder()
-        .setName("setvoice")
-        .setDescription("Setzt den Standard-Voice-Channel für diesen Server.")
-        .addChannelOption((opt) =>
-          opt
-            .setName("channel")
-            .setDescription("Voice-Channel")
-            .addChannelTypes(ChannelType.GuildVoice, ChannelType.GuildStageVoice)
-            .setRequired(true)
-        ),
-      new SlashCommandBuilder()
-        .setName("settext")
-        .setDescription("Setzt den Steuer-Textkanal für diesen Server.")
-        .addChannelOption((opt) =>
-          opt
-            .setName("channel")
-            .setDescription("Text-Channel")
-            .addChannelTypes(ChannelType.GuildText)
-            .setRequired(true)
-        ),
-      new SlashCommandBuilder()
-        .setName("about")
-        .setDescription("Infos zum Musikbot anzeigen."),
-
-new SlashCommandBuilder().setName("help").setDescription("Zeigt eine Hilfeübersicht für den Musikbot."),
-
-
-new SlashCommandBuilder()
-  .setName("volume")
-  .setDescription("Stellt die Lautstärke (0–150%) ein.")
-  .addIntegerOption(o => o.setName("value").setDescription("0–150").setRequired(true)),
-
-
-new SlashCommandBuilder().setName("np").setDescription("Zeigt den aktuell spielenden Track."),
-
-
-new SlashCommandBuilder()
-  .setName("autoplay")
-  .setDescription("Verwaltet die Autoplayliste.")
-  .addSubcommand(sc => sc.setName("add").setDescription("URL zur Autoplayliste hinzufügen").addStringOption(o => o.setName("url").setDescription("Medien-URL").setRequired(true)))
-  .addSubcommand(sc => sc.setName("remove").setDescription("Eintrag aus Autoplayliste entfernen").addIntegerOption(o => o.setName("index").setDescription("1-basiert").setRequired(true)))
-  .addSubcommand(sc => sc.setName("list").setDescription("Autoplayliste anzeigen"))
-  .addSubcommand(sc => sc.setName("clear").setDescription("Autoplayliste leeren")),
-
-    ].map((c) => c.toJSON());
-
-    const rest = new REST({ version: "10" }).setToken(DISCORD_TOKEN);
-    await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
-    addLog("[discord] Slash-Commands erfolgreich registriert.");
-  } catch (err) {
-    console.error(err);
-    addLog("[discord] Fehler beim Registrieren der Slash-Commands.");
+  if (playerMessages.has(player.guildId)) {
+    try { await playerMessages.get(player.guildId).edit({ content: "✅ **Queue beendet.**", embeds: [], components: [] }); } catch {}
+    playerMessages.delete(player.guildId);
   }
-}
+});
 
-async function getOrCreatePlayer(guild, voiceChannelId, textChannelId) {
-  const player = await client.lavalink.createPlayer({
-    guildId: guild.id,
-    voiceChannelId,
-    textChannelId,
-    selfDeaf: true,
-    selfMute: false,
-  });
-  if (!player.connected) await player.connect();
-  return player;
-}
-
+// --------- COMMAND HANDLERS (aus backup.js) ---------
 async function handlePlay(guild, user, query) {
   const settings = guildSettings.get(guild.id) || {};
   const voiceChannelId = settings.voiceChannelId;
   const textChannelId = settings.textChannelId;
-
-  if (!voiceChannelId) {
-    throw new Error("Kein Voice-Channel gesetzt. Nutze /setvoice im Discord oder wähle ihn im Web-Interface.");
-  }
-
+  if (!voiceChannelId) throw new Error("Kein Voice-Channel gesetzt. Nutze /setvoice im Discord oder wähle ihn im Web-Interface.");
   const player = await getOrCreatePlayer(guild, voiceChannelId, textChannelId);
   const searchResult = await player.search({ query }, user);
-  if (!searchResult || !Array.isArray(searchResult.tracks) || !searchResult.tracks.length) {
-    throw new Error("Keine Treffer gefunden.");
-  }
+  if (!searchResult || !Array.isArray(searchResult.tracks) || !searchResult.tracks.length) throw new Error("Keine Treffer gefunden.");
   const track = searchResult.tracks[0];
   await player.queue.add(track);
   await interruptAutoplayForUser(guild.id);
-
-  addLog(
-    `[queue ${guild.id}] Track in Queue gelegt: ${track.info.title} (${track.info.uri})`
-  );
+  addLog(`[queue ${guild.id}] Track in Queue gelegt: ${track.info.title} (${track.info.uri})`);
   if (!player.playing) await player.play();
   return track;
 }
-
 async function handleSkip(guildId) {
   const player = client.lavalink.getPlayer(guildId);
   if (!player) throw new Error("Kein Player für diesen Server.");
   if (!player.queue.current) throw new Error("Kein Track läuft gerade.");
   await player.skip();
 }
-
 async function handleStop(guildId) {
   const player = client.lavalink.getPlayer(guildId);
   if (!player) throw new Error("Kein Player für diesen Server.");
   await player.queue.clear();
   await player.stop();
 }
-
 async function handleLeave(guildId) {
   const player = client.lavalink.getPlayer(guildId);
   if (player) {
@@ -421,15 +346,57 @@ async function handleLeave(guildId) {
   }
 }
 
+// --------- MESSAGE & INTERACTION HANDLING ---------
+client.on("interactionCreate", async (interaction) => {
+  if (interaction.isButton()) {
+    const player = client.lavalink.getPlayer(interaction.guildId);
+    if (!player) return interaction.reply({ content: "Kein Player.", ephemeral: true });
+    if (interaction.member.voice.channelId !== player.voiceChannelId) return interaction.reply({ content: "Falscher Channel!", ephemeral: true });
 
-// ------ Discord Message-Commands ------
+    if (interaction.customId === "pause") {
+      const newState = !player.paused;
+      await player.pause(newState);
+      await interaction.update({ components: [createButtons(newState)] });
+    } else if (interaction.customId === "skip") {
+      await player.skip();
+      await interaction.reply({ content: "Skipped.", ephemeral: true });
+    } else if (interaction.customId === "stop") {
+      await player.stop(); player.queue.clear();
+      await interaction.update({ content: "Stopped.", components: [] });
+    } else if (interaction.customId === "list") {
+      const q = player.queue.tracks.map((t, i) => `${i + 1}. ${t.info.title}`).join("\n").substr(0, 1000) || "Leer";
+      await interaction.reply({ content: `**Queue:**\n${q}`, ephemeral: true });
+    }
+  }
+
+  if (interaction.isChatInputCommand && interaction.isChatInputCommand()) {
+    const cmd = interaction.commandName;
+    try {
+      if (cmd === "play") {
+        await interaction.deferReply();
+        const query = interaction.options.getString("query");
+        if (!interaction.member.voice.channel) return interaction.editReply("Kein Voice!");
+        const p = await getOrCreatePlayer(interaction.guild, interaction.member.voice.channel.id, interaction.channelId);
+        const r = await p.search({ query }, interaction.user);
+        if (!r.tracks.length) return interaction.editReply("Nix gefunden.");
+        await p.queue.add(r.tracks[0]);
+        if (!p.playing) await p.play();
+        interaction.editReply(`✅ **${r.tracks[0].info.title}**`);
+      } else if (cmd === "np") {
+        const p = client.lavalink.getPlayer(interaction.guildId);
+        if (!p || !p.queue.current) return interaction.reply("Stille.");
+        const msg = await interaction.reply({ embeds: [createNowPlayingEmbed(p.queue.current, p)], components: [createButtons(p.paused)], fetchReply: true });
+        playerMessages.set(interaction.guildId, msg);
+      }
+    } catch (e) { interaction.editReply("Fehler: " + (e && e.message)); }
+  }
+});
+
 client.on("messageCreate", async (message) => {
   if (message.author.bot || !message.guild) return;
   if (!message.content.startsWith(COMMAND_PREFIX)) return;
-
   const args = message.content.slice(COMMAND_PREFIX.length).trim().split(/\s+/);
   const cmd = args.shift()?.toLowerCase();
-
   if (!cmd) return;
 
   try {
@@ -437,9 +404,7 @@ client.on("messageCreate", async (message) => {
       const query = args.join(" ");
       if (!query) return message.reply("Bitte gib einen Suchbegriff oder Link an.");
       const track = await handlePlay(message.guild, message.author, query);
-      await message.reply(
-        `▶️ **${track.info.title}** wurde zur Queue hinzugefügt.`
-      );
+      await message.reply(`▶️ **${track.info.title}** wurde zur Queue hinzugefügt.`);
     } else if (cmd === "skip") {
       await handleSkip(message.guild.id);
       await message.reply("⏭️ Übersprungen.");
@@ -464,96 +429,26 @@ client.on("messageCreate", async (message) => {
       scheduleSaveGuildSettings();
       await message.reply(`💬 Steuer-Textkanal gesetzt auf **${message.channel.name}**.`);
     } else if (cmd === "about") {
-      await message.reply(
-        "🎵 Nightwolf Entertainments Musikbot – mit Webinterface und Lavalink.\n" +
-          `Prefix: \`${COMMAND_PREFIX}\`\n` +
-          "Nutze /play oder !play, um Songs abzuspielen."
-      );
+      await message.reply("🎵 Nightwolf Entertainments Musikbot – mit Webinterface und Lavalink.\n" + `Prefix: \`${COMMAND_PREFIX}\``);
     } else if (cmd === "help" || cmd === "h") {
-      // Hilfe-Embed (nutzt dieselbe Funktion wie /help)
       const embed = createHelpEmbed();
       await message.reply({ embeds: [embed] });
     }
   } catch (err) {
     console.error(err);
-    await message.reply(
-      `Es ist ein Fehler aufgetreten: ${(err && err.message) || err}`
-    );
+    await message.reply(`Es ist ein Fehler aufgetreten: ${(err && err.message) || err}`);
   }
 });
 
-
-// ------ Discord Slash Commands ------
-client.on("messageCreate", async (message) => {
-  if (message.author.bot || !message.guild) return;
-  if (!message.content.startsWith(COMMAND_PREFIX)) return;
-
-  const args = message.content.slice(COMMAND_PREFIX.length).trim().split(/\s+/);
-  const cmd = args.shift()?.toLowerCase();
-
-  if (!cmd) return;
-
-  try {
-    if (cmd === "play" || cmd === "p") {
-      const query = args.join(" ");
-      if (!query) return message.reply("Bitte gib einen Suchbegriff oder Link an.");
-      const track = await handlePlay(message.guild, message.author, query);
-      await message.reply(
-        `▶️ **${track.info.title}** wurde zur Queue hinzugefügt.`
-      );
-    } else if (cmd === "skip") {
-      await handleSkip(message.guild.id);
-      await message.reply("⏭️ Übersprungen.");
-    } else if (cmd === "stop") {
-      await handleStop(message.guild.id);
-      await message.reply("⏹️ Wiedergabe gestoppt und Queue geleert.");
-    } else if (cmd === "leave") {
-      await handleLeave(message.guild.id);
-      await message.reply("👋 Voice-Channel verlassen.");
-    } else if (cmd === "setvoice") {
-      const vc = message.member.voice.channel;
-      if (!vc) return message.reply("Bitte gehe zuerst in einen Voice-Channel.");
-      const settings = guildSettings.get(message.guild.id) || {};
-      settings.voiceChannelId = vc.id;
-      guildSettings.set(message.guild.id, settings);
-      scheduleSaveGuildSettings();
-      await message.reply(`🎧 Voice-Channel gesetzt auf **${vc.name}**.`);
-    } else if (cmd === "settext") {
-      const settings = guildSettings.get(message.guild.id) || {};
-      settings.textChannelId = message.channel.id;
-      guildSettings.set(message.guild.id, settings);
-      scheduleSaveGuildSettings();
-      await message.reply(`💬 Steuer-Textkanal gesetzt auf **${message.channel.name}**.`);
-    } else if (cmd === "about") {
-      await message.reply(
-        "🎵 Nightwolf Entertainments Musikbot – mit Webinterface und Lavalink.\n" +
-          `Prefix: \`${COMMAND_PREFIX}\`\n` +
-          "Nutze /play oder !play, um Songs abzuspielen."
-      );
-    } else if (cmd === "help" || cmd === "h") {
-      // Hilfe-Embed (nutzt dieselbe Funktion wie /help)
-      const embed = createHelpEmbed();
-      await message.reply({ embeds: [embed] });
-    }
-  } catch (err) {
-    console.error(err);
-    await message.reply(
-      `Es ist ein Fehler aufgetreten: ${(err && err.message) || err}`
-    );
-  }
-});
-
-
-// --------- WEB SERVER ---------
+// --------- WEB SERVER (API) ---------
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
+app.use(express.static(path.join(__dirname, "..", "public")));
 
 function authMiddleware(req, res, next) {
   const token = req.headers["x-api-key"];
-  if (!token || token !== WEB_PASSWORD) {
-    return res.status(401).json({ error: "Unauthorized" });
-  }
+  if (!token || token !== WEB_PASSWORD) return res.status(401).json({ error: "Unauthorized" });
   next();
 }
 
@@ -562,76 +457,39 @@ app.get("/api/status", authMiddleware, (req, res) => {
     botOnline: !!client.user,
     botTag: client.user ? client.user.tag : null,
     lavalinkReady,
-    guilds: client.guilds.cache.map((g) => ({
-      id: g.id,
-      name: g.name,
-    })),
+    guilds: client.guilds.cache.map(g => ({ id: g.id, name: g.name }))
   });
 });
 
-app.get("/api/logs", authMiddleware, (req, res) => {
-  res.json({ lines: logBuffer });
-});
+app.get("/api/logs", authMiddleware, (req, res) => res.json({ lines: logBuffer }));
 
-app.get("/api/guilds", authMiddleware, (req, res) => {
-  res.json({
-    guilds: client.guilds.cache.map((g) => ({
-      id: g.id,
-      name: g.name,
-    })),
-  });
-});
+app.get("/api/guilds", authMiddleware, (req, res) => res.json({ guilds: client.guilds.cache.map(g => ({ id: g.id, name: g.name })) }));
 
 app.get("/api/guilds/:id/details", authMiddleware, async (req, res) => {
   try {
     const guildId = req.params.id;
     const guild = await client.guilds.fetch(guildId);
-
-    // Wichtig: nur Cache verwenden, keine zusätzlichen Discord-HTTP-Calls.
     const fetched = guild.channels.cache;
-
     const textChannels = [];
     const voiceChannels = [];
-
     for (const [id, ch] of fetched) {
       if (!ch) continue;
       if (ch.viewable === false) continue;
-
       try {
-        if (typeof ch.isTextBased === "function" && ch.isTextBased()) {
-          textChannels.push({ id: ch.id, name: ch.name || ch.id });
-        }
-
-        if (
-          ch.type === ChannelType.GuildVoice ||
-          ch.type === ChannelType.GuildStageVoice ||
-          ch.type === 2 ||
-          ch.type === 13
-        ) {
-          voiceChannels.push({ id: ch.id, name: ch.name || ch.id });
-        }
-      } catch (innerErr) {
-        console.error("[guild-details] Channel-Analyse Fehler:", innerErr);
-      }
+        if (typeof ch.isTextBased === "function" && ch.isTextBased()) textChannels.push({ id: ch.id, name: ch.name || ch.id });
+        if (ch.type === ChannelType.GuildVoice || ch.type === ChannelType.GuildStageVoice || ch.type === 2 || ch.type === 13) voiceChannels.push({ id: ch.id, name: ch.name || ch.id });
+      } catch (innerErr) { console.error("[guild-details] Channel-Analyse Fehler:", innerErr); }
     }
-
     textChannels.sort((a, b) => a.name.localeCompare(b.name));
     voiceChannels.sort((a, b) => a.name.localeCompare(b.name));
-
     const settings = guildSettings.get(guild.id) || {};
-
-    res.json({
-      id: guild.id,
-      name: guild.name,
-      textChannels,
-      voiceChannels,
-      settings,
-    });
+    res.json({ id: guild.id, name: guild.name, textChannels, voiceChannels, settings });
   } catch (err) {
     console.error("[guild-details] Fehler:", err);
     res.status(500).json({ error: "Fehler beim Lesen der Server-Daten." });
   }
 });
+
 app.post("/api/guilds/:id/settings", authMiddleware, (req, res) => {
   const guildId = req.params.id;
   const { textChannelId, voiceChannelId } = req.body || {};
@@ -652,15 +510,7 @@ app.post("/api/guilds/:id/play", authMiddleware, async (req, res) => {
     const guild = await client.guilds.fetch(guildId);
     const fakeUser = { id: "0", username: "WebUI" };
     const track = await handlePlay(guild, fakeUser, query);
-    res.json({
-      ok: true,
-      track: {
-        title: track.info.title,
-        uri: track.info.uri,
-        author: track.info.author,
-        length: track.info.length,
-      },
-    });
+    res.json({ ok: true, track: { title: track.info.title, uri: track.info.uri, author: track.info.author, length: track.info.length } });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: (err && err.message) || String(err) });
@@ -668,47 +518,15 @@ app.post("/api/guilds/:id/play", authMiddleware, async (req, res) => {
 });
 
 app.post("/api/guilds/:id/skip", authMiddleware, async (req, res) => {
-  try {
-    const guildId = req.params.id;
-    await handleSkip(guildId);
-    res.json({ ok: true });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: (err && err.message) || String(err) });
-  }
+  try { await handleSkip(req.params.id); res.json({ ok: true }); } catch (err) { console.error(err); res.status(500).json({ error: (err && err.message) || String(err) }); }
 });
-
 app.post("/api/guilds/:id/stop", authMiddleware, async (req, res) => {
-  try {
-    const guildId = req.params.id;
-    await handleStop(guildId);
-    res.json({ ok: true });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: (err && err.message) || String(err) });
-  }
+  try { await handleStop(req.params.id); res.json({ ok: true }); } catch (err) { console.error(err); res.status(500).json({ error: (err && err.message) || String(err) }); }
 });
-
 app.post("/api/guilds/:id/leave", authMiddleware, async (req, res) => {
-  try {
-    const guildId = req.params.id;
-    await handleLeave(guildId);
-    res.json({ ok: true });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: (err && err.message) || String(err) });
-  }
+  try { await handleLeave(req.params.id); res.json({ ok: true }); } catch (err) { console.error(err); res.status(500).json({ error: (err && err.message) || String(err) }); }
 });
 
-// Static files (Web-UI)
-const publicPath = path.join(__dirname, "..", "public");
-app.use(express.static(publicPath));
-app.get("*", (req, res) => {
-  res.sendFile(path.join(publicPath, "index.html"));
-});
-
-
-// ---- API: Autoplay & Now Playing ----
 app.get("/api/np", (req, res) => {
   const guildId = req.query.guildId;
   if (!guildId) return res.status(400).json({ error: "missing_guildId" });
@@ -723,7 +541,6 @@ app.get("/api/autoplay/:guildId", (req, res) => {
   const s = ensureGuildSettings(gid);
   res.json({ guildId: gid, autoplaylist: s.autoplaylist, autoplayIndex: s.autoplayIndex });
 });
-
 app.post("/api/autoplay/:guildId/add", (req, res) => {
   const gid = req.params.guildId;
   const url = (req.body?.url || "").trim();
@@ -733,19 +550,17 @@ app.post("/api/autoplay/:guildId/add", (req, res) => {
   scheduleSaveGuildSettings();
   res.json({ guildId: gid, autoplaylist: s.autoplaylist, autoplayIndex: s.autoplayIndex });
 });
-
 app.post("/api/autoplay/:guildId/remove", (req, res) => {
   const gid = req.params.guildId;
   const index = Number(req.body?.index);
   const s = ensureGuildSettings(gid);
   if (Number.isFinite(index) && index >= 1 && index <= s.autoplaylist.length) {
-    s.autoplaylist.splice(index-1, 1);
+    s.autoplaylist.splice(index - 1, 1);
     if (s.autoplayIndex >= s.autoplaylist.length) s.autoplayIndex = 0;
     scheduleSaveGuildSettings();
   }
   res.json({ guildId: gid, autoplaylist: s.autoplaylist, autoplayIndex: s.autoplayIndex });
 });
-
 app.post("/api/autoplay/:guildId/clear", (req, res) => {
   const gid = req.params.guildId;
   const s = ensureGuildSettings(gid);
@@ -754,12 +569,70 @@ app.post("/api/autoplay/:guildId/clear", (req, res) => {
   scheduleSaveGuildSettings();
   res.json({ guildId: gid, autoplaylist: s.autoplaylist, autoplayIndex: s.autoplayIndex });
 });
-app.listen(WEB_PORT, () => {
-  addLog(`Webinterface läuft auf Port ${WEB_PORT}`);
+
+app.use(express.static(path.join(__dirname, "..", "public")));
+app.get("*", (req, res) => res.sendFile(path.join(__dirname, "..", "public", "index.html")));
+app.listen(WEB_PORT, () => addLog(`Webinterface auf Port ${WEB_PORT}`));
+
+// --------- START & SLASH REGISTRATION ---------
+async function registerSlashCommands() {
+  try {
+    const commands = [
+      new SlashCommandBuilder().setName("play").setDescription("Spielt einen Song oder fügt ihn zur Queue hinzu.").addStringOption(o => o.setName("query").setRequired(true).setDescription("YouTube-Link oder Suchbegriff")),
+      new SlashCommandBuilder().setName("skip").setDescription("Überspringt den aktuellen Song."),
+      new SlashCommandBuilder().setName("stop").setDescription("Stoppt die Wiedergabe und leert die Queue."),
+      new SlashCommandBuilder().setName("leave").setDescription("Verlässt den Voice-Channel."),
+      new SlashCommandBuilder().setName("setvoice").setDescription("Setzt den Standard-Voice-Channel für diesen Server.").addChannelOption(opt => opt.setName("channel").addChannelTypes(ChannelType.GuildVoice, ChannelType.GuildStageVoice).setRequired(true)),
+      new SlashCommandBuilder().setName("settext").setDescription("Setzt den Steuer-Textkanal.").addChannelOption(opt => opt.setName("channel").addChannelTypes(ChannelType.GuildText).setRequired(true)),
+      new SlashCommandBuilder().setName("about").setDescription("Infos zum Musikbot anzeigen."),
+      new SlashCommandBuilder().setName("help").setDescription("Zeigt eine Hilfeübersicht für den Musikbot."),
+      new SlashCommandBuilder().setName("np").setDescription("Zeigt den aktuell spielenden Track."),
+      new SlashCommandBuilder().setName("volume").setDescription("Stellt die Lautstärke (0–150%) ein.").addIntegerOption(o => o.setName("value").setDescription("0–150").setRequired(true)),
+      new SlashCommandBuilder().setName("autoplay").setDescription("Verwaltet die Autoplayliste.")
+        .addSubcommand(sc => sc.setName("add").setDescription("URL zur Autoplayliste hinzufügen").addStringOption(o => o.setName("url").setRequired(true)))
+        .addSubcommand(sc => sc.setName("remove").setDescription("Eintrag entfernen").addIntegerOption(o => o.setName("index").setRequired(true)))
+        .addSubcommand(sc => sc.setName("list").setDescription("Autoplayliste anzeigen"))
+        .addSubcommand(sc => sc.setName("clear").setDescription("Autoplayliste leeren"))
+    ].map(c => c.toJSON());
+
+    const rest = new REST({ version: "10" }).setToken(DISCORD_TOKEN);
+    await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
+    addLog("[discord] Slash-Commands erfolgreich registriert.");
+  } catch (err) {
+    console.error(err);
+    addLog("[discord] Fehler beim Registrieren der Slash-Commands.");
+  }
+}
+
+client.once("ready", async () => {
+  addLog(`[discord] Eingeloggt als ${client.user.tag}`);
+  try {
+    await client.lavalink.init({ id: client.user.id, username: client.user.username });
+    addLog("[lavalink] init aufgerufen");
+  } catch (e) {
+    addLog("[lavalink] init fehlgeschlagen: " + (e && e.message));
+  }
+  await registerSlashCommands();
 });
 
-// Discord Login
+// Login
 client.login(DISCORD_TOKEN).catch((err) => {
   console.error("Login-Fehler:", err);
   addLog("Fehler beim Einloggen des Discord-Bots.");
+});
+
+// --------- SIGNAL HANDLER (Graceful Shutdown) ---------
+process.on('SIGTERM', async () => {
+  addLog('SIGTERM empfangen, fahre herunter...');
+  try { await client.destroy(); } catch (e) { console.error(e); }
+  process.exit(0);
+});
+process.on('SIGINT', async () => {
+  addLog('SIGINT empfangen, fahre herunter...');
+  try { await client.destroy(); } catch (e) { console.error(e); }
+  process.exit(0);
+});
+process.on('uncaughtException', err => {
+  console.error('Uncaught Exception:', err);
+  process.exit(1);
 });
