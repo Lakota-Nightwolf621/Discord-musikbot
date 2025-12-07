@@ -210,7 +210,7 @@ module.exports = function registerMessageHandlers(ctx = {}) {
                 { name: "Prefix", value: `\`${COMMAND_PREFIX}\``, inline: true },
                 { name: "RAM (RSS)", value: `\`${memMB} MB\``, inline: true },
                 { name: "CPU Load (1m)", value: `\`${cpu}\``, inline: true },
-                { name: "Hoster", value: `\`https://lakotanightwolf.de\``, inline: true },
+                { name: "Hoster", value: `\lakotanightwolf.de\``, inline: true },
               )
               .setColor(0x5865f2)
               .setFooter({ text: "Nightwolf Entertainments", iconURL: client.user?.displayAvatarURL() });
@@ -311,7 +311,7 @@ module.exports = function registerMessageHandlers(ctx = {}) {
               { name: "Prefix", value: `\`${COMMAND_PREFIX}\``, inline: true },
               { name: "RAM (RSS)", value: `\`${memMB} MB\``, inline: true },
               { name: "CPU Load (1m)", value: `\`${cpu}\``, inline: true },
-              { name: "Uptime", value: `\`${uptimeH} h\``, inline: true }
+              { name: "Hoster", value: `\ lakotanightwolf.de\``, inline: true }
             )
             .setColor(0x5865f2)
             .setFooter({ text: "Nightwolf Entertainments", iconURL: client.user?.displayAvatarURL() });
