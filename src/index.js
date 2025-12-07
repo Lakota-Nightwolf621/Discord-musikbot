@@ -13,7 +13,7 @@ const { LavalinkManager } = require("lavalink-client");
 
 // Externe Module
 const registerMessageHandlers = require("./message");
-const { commands } = require("./commands"); // nur Metadaten (wird von message.js ebenfalls genutzt)
+const { commands } = require("./commands");
 
 // --------- ENV / KONFIG ---------
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN || "";
@@ -126,7 +126,6 @@ function setGuildVolume(guildId, v) {
   val = Math.max(0, Math.min(150, val));
   s.volume = val;
   scheduleSaveGuildSettings();
-  // apply to player if exists
   try { const p = client.lavalink.getPlayer(guildId); if (p) p.setVolume(val).catch(() => {}); } catch {}
   return val;
 }
@@ -166,7 +165,7 @@ async function interruptAutoplayForUser(guildId) {
   if (rt.isAutoplayCurrent) { try { await player.stop(); } catch {} }
 }
 
-// Voice resolution (kein Zwang mehr)
+// Voice resolution
 async function resolveVoiceChannelId(guild, member) {
   try { if (member && member.voice && member.voice.channelId) return member.voice.channelId; } catch (e) {}
   const s = ensureGuildSettings(guild.id);
@@ -176,7 +175,7 @@ async function resolveVoiceChannelId(guild, member) {
   return null;
 }
 
-// Core control handlers (werden an message.js übergeben)
+// Core control handlers
 async function handlePlay(guild, userMember, query, textChannelId = null) {
   const voiceChannelId = await resolveVoiceChannelId(guild, userMember);
   if (!voiceChannelId) throw new Error("Kein Voice-Channel verfügbar. Bitte trete einem Voice-Channel bei oder setze einen Standard mit /setvoice.");
@@ -230,7 +229,7 @@ client.lavalink.on("queueEnd", async (player) => {
   }
 });
 
-// --------- WEB SERVER (Status, NP, Autoplay) ---------
+// --------- WEB SERVER (Status, NP, Autoplay, Logs) ---------
 const app = express();
 app.use(cors());
 app.use(bodyParser.json());
@@ -259,12 +258,34 @@ app.get("/api/np", auth, async (req, res) => {
   if (!gid) return res.status(400).json({ error: "missing_guildId" });
   const p = client.lavalink.getPlayer(gid);
   if (!p || !p.queue.current) return res.json({ playing: false });
-  res.json({ playing: true, title: p.queue.current.info.title, author: p.queue.current.info.author, position: p.position ?? 0, duration: p.queue.current.info.length, paused: p.paused });
+  const pos = Number(p.position ?? p.state?.position ?? p.state?.playbackDuration ?? 0) || 0;
+  const dur = Number(p.queue.current.info?.length ?? p.queue.current.info?.duration ?? 0) || 0;
+  res.json({
+    playing: true,
+    title: p.queue.current.info?.title ?? null,
+    author: p.queue.current.info?.author ?? null,
+    position: pos,
+    duration: dur,
+    paused: !!p.paused
+  });
 });
 
+// Autoplay endpoints
 app.get("/api/autoplay/:gid", auth, (req, res) => res.json({ list: ensureGuildSettings(req.params.gid).autoplaylist }));
 app.post("/api/autoplay/:gid/add", auth, (req, res) => { const s = ensureGuildSettings(req.params.gid); if (req.body.url) s.autoplaylist.push(req.body.url); scheduleSaveGuildSettings(); res.json({ list: s.autoplaylist }); });
 app.post("/api/autoplay/:gid/clear", auth, (req, res) => { const s = ensureGuildSettings(req.params.gid); s.autoplaylist = []; scheduleSaveGuildSettings(); res.json({ list: [] }); });
+
+// Logs endpoint
+app.get("/api/logs", auth, (req, res) => {
+  try {
+    const limit = Math.max(1, Math.min(1000, Number(req.query.limit || 200)));
+    const start = Math.max(0, logBuffer.length - limit);
+    const slice = logBuffer.slice(start);
+    res.json({ lines: slice, total: logBuffer.length });
+  } catch (e) {
+    res.status(500).json({ error: e.message || "unknown" });
+  }
+});
 
 app.get("*", (req, res) => res.sendFile(path.join(__dirname, "..", "public", "index.html")));
 app.listen(WEB_PORT, () => addLog(`Webinterface auf Port ${WEB_PORT}`));
@@ -289,7 +310,6 @@ client.once("ready", async () => {
     addLog("[lavalink] init fehlgeschlagen: " + (e && e.message));
   }
 
-  // optional: register slash commands globally (message.js will also register if configured)
   try { await registerSlashCommandsGlobal(); } catch (e) {}
 
   // Registriere message/interaction handler (komplette Logik in message.js)
