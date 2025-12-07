@@ -1,8 +1,9 @@
-// 
+// commands.js
 const { SlashCommandBuilder, ChannelType } = require("discord.js");
 
 /**
  * Vollständig definierte Slash-Commands mit Description für Commands und Options.
+ * Jede Command- und Option-Description ist ein String, damit toJSON() nicht fehlschlägt.
  */
 
 const builders = [
@@ -88,16 +89,19 @@ const builders = [
 
   new SlashCommandBuilder()
     .setName("ping")
-    .setDescription("Zeigt Latenz, Prozess- und Lavalink-Status.")
+    .setDescription("Zeigt Latenz, Prozess- und Lavalink-Status."),
+
+  new SlashCommandBuilder()
+    .setName("about")
+    .setDescription("Zeigt Systeminformationen wie RAM, CPU-Load und Uptime.")
 ];
 
-// Serialisieren in JSON für die Registrierung
+// Serialisieren in JSON für die Registrierung (robust)
 const commands = builders.map((b, idx) => {
   try {
     return b.toJSON();
   } catch (err) {
     const name = (b && b.name) || `builder_index_${idx}`;
-    // Falls serialisierung fehlschlägt, setze eine Default-Description und versuche erneut
     try {
       if (typeof b.setDescription === "function") b.setDescription("No description provided.");
       return b.toJSON();
