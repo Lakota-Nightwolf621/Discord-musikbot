@@ -61,15 +61,12 @@ const builders = [
 
 // Validate and ensure descriptions are strings, then export JSON
 for (const b of builders) {
-  // If description is missing or not a string, set a safe default
   try {
     const desc = b.description;
     if (typeof desc !== "string" || desc.trim() === "") {
-      // fallback default
       b.setDescription("No description provided.");
     }
   } catch (e) {
-    // Some versions of the builder may not expose .description; ignore and continue
     try { b.setDescription("No description provided."); } catch {}
   }
 }
