@@ -1,8 +1,7 @@
 // index.js
-// Minimaler Hauptprozess: Config, Lavalink, Persistenz, Web API.
-// Alle Commands / Interactions / Embeds sind ausgelagert in message.js
-const registerMessageHandlers = require("./message");
-const { commands } = require("./commands"); // optional, falls du in index.js Slash-Registration willst
+// Hauptprozess: Config, Lavalink, Persistenz, Web API.
+// Commands, Embeds und Message-Handling sind in message.js ausgelagert.
+
 const path = require("path");
 const fs = require("fs");
 const os = require("os");
@@ -12,11 +11,11 @@ const cors = require("cors");
 const { Client, GatewayIntentBits, Partials, REST, Routes } = require("discord.js");
 const { LavalinkManager } = require("lavalink-client");
 
-// Externe Module (Commands metadata + Message handler)
-const { commands } = require("./commands"); // nur Metadaten für Registrierung
-const registerMessageHandlers = require("./message"); // registriert alle message + interaction handler
+// Externe Module
+const registerMessageHandlers = require("./message");
+const { commands } = require("./commands"); // nur Metadaten (wird von message.js ebenfalls genutzt)
 
-// --------- ENV / CONFIG ---------
+// --------- ENV / KONFIG ---------
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN || "";
 const WEB_PASSWORD = process.env.WEB_PASSWORD || "changeme";
 const COMMAND_PREFIX = process.env.COMMAND_PREFIX || "!";
@@ -109,6 +108,128 @@ client.lavalink.on("nodeConnect", (node) => { lavalinkReady = true; addLog(`[lav
 client.lavalink.on("nodeDisconnect", (node, reason) => { lavalinkReady = false; addLog(`[lavalink] Node disconnected: ${node?.id} reason=${reason}`); });
 client.lavalink.on("nodeError", (node, err) => addLog(`[lavalink] Node error: ${node?.id} ${err?.message || err}`));
 
+// --------- CORE: Player helpers (werden an message.js übergeben) ---------
+async function getOrCreatePlayer(guild, voiceChannelId, textChannelId) {
+  const player = await client.lavalink.createPlayer({ guildId: guild.id, voiceChannelId, textChannelId, selfDeaf: true, selfMute: false });
+  if (!player.connected) await player.connect();
+  return player;
+}
+
+function getGuildVolume(guildId) {
+  const s = ensureGuildSettings(guildId);
+  return typeof s.volume === "number" ? s.volume : 100;
+}
+function setGuildVolume(guildId, v) {
+  const s = ensureGuildSettings(guildId);
+  let val = Number(v);
+  if (!Number.isFinite(val)) val = 100;
+  val = Math.max(0, Math.min(150, val));
+  s.volume = val;
+  scheduleSaveGuildSettings();
+  // apply to player if exists
+  try { const p = client.lavalink.getPlayer(guildId); if (p) p.setVolume(val).catch(() => {}); } catch {}
+  return val;
+}
+async function applyGuildVolume(guildId) {
+  const p = client.lavalink.getPlayer(guildId);
+  if (!p) return;
+  try { await p.setVolume(getGuildVolume(guildId)); } catch {}
+}
+
+// Autoplay helpers
+const runtimeState = new Map();
+function ensureRuntime(gid) {
+  let rt = runtimeState.get(gid);
+  if (!rt) { rt = { current: null, autoplayPending: false, isAutoplayCurrent: false }; runtimeState.set(gid, rt); }
+  return rt;
+}
+async function playAutoplayNext(guildId) {
+  const s = ensureGuildSettings(guildId);
+  if (!s.autoplaylist || !s.autoplaylist.length) return false;
+  const url = s.autoplaylist[s.autoplayIndex % s.autoplaylist.length];
+  s.autoplayIndex = (s.autoplayIndex + 1) % s.autoplaylist.length;
+  scheduleSaveGuildSettings();
+  const player = client.lavalink.getPlayer(guildId);
+  if (!player) return false;
+  const res = await player.search({ query: url }, client.user);
+  if (!res?.tracks?.length) return false;
+  await player.queue.add(res.tracks[0]);
+  const rt = ensureRuntime(guildId);
+  rt.autoplayPending = true;
+  if (!player.playing && !player.paused) await player.play();
+  return true;
+}
+async function interruptAutoplayForUser(guildId) {
+  const player = client.lavalink.getPlayer(guildId);
+  if (!player) return;
+  const rt = ensureRuntime(guildId);
+  if (rt.isAutoplayCurrent) { try { await player.stop(); } catch {} }
+}
+
+// Voice resolution (kein Zwang mehr)
+async function resolveVoiceChannelId(guild, member) {
+  try { if (member && member.voice && member.voice.channelId) return member.voice.channelId; } catch (e) {}
+  const s = ensureGuildSettings(guild.id);
+  if (s.voiceChannelId) return s.voiceChannelId;
+  const first = guild.channels.cache.find(c => c.type === 2 || c.type === 13);
+  if (first) return first.id;
+  return null;
+}
+
+// Core control handlers (werden an message.js übergeben)
+async function handlePlay(guild, userMember, query, textChannelId = null) {
+  const voiceChannelId = await resolveVoiceChannelId(guild, userMember);
+  if (!voiceChannelId) throw new Error("Kein Voice-Channel verfügbar. Bitte trete einem Voice-Channel bei oder setze einen Standard mit /setvoice.");
+  const player = await getOrCreatePlayer(guild, voiceChannelId, textChannelId);
+  const res = await player.search({ query }, userMember || client.user);
+  if (!res?.tracks?.length) throw new Error("Keine Treffer gefunden.");
+  await player.queue.add(res.tracks[0]);
+  await interruptAutoplayForUser(guild.id);
+  if (!player.playing) await player.play();
+  return res.tracks[0];
+}
+async function handleSkip(guildId) {
+  const p = client.lavalink.getPlayer(guildId);
+  if (!p) throw new Error("Kein Player für diesen Server.");
+  if (!p.queue.current) throw new Error("Kein Track läuft.");
+  await p.skip();
+}
+async function handleStop(guildId) {
+  const p = client.lavalink.getPlayer(guildId);
+  if (!p) throw new Error("Kein Player für diesen Server.");
+  await p.queue.clear();
+  await p.stop();
+}
+async function handleLeave(guildId) {
+  const p = client.lavalink.getPlayer(guildId);
+  if (p) { await p.destroy(); client.lavalink.deletePlayer(guildId); }
+}
+
+// --------- Player message tracking (wird an message.js übergeben) ---------
+const playerMessages = new Map();
+
+// --------- Lavalink events: trackStart / queueEnd (logging + volume) ---------
+client.lavalink.on("trackStart", async (player, track) => {
+  const rt = ensureRuntime(player.guildId);
+  rt.current = { title: track.info?.title, uri: track.info?.uri };
+  rt.isAutoplayCurrent = !!rt.autoplayPending;
+  rt.autoplayPending = false;
+  addLog(`[player ${player.guildId}] Start: ${track.info.title}`);
+  await applyGuildVolume(player.guildId);
+});
+
+client.lavalink.on("queueEnd", async (player) => {
+  addLog(`[player ${player.guildId}] Queue leer`);
+  const s = ensureGuildSettings(player.guildId);
+  if (s.autoplaylist && s.autoplaylist.length) {
+    try { await playAutoplayNext(player.guildId); } catch (e) { addLog("[autoplay] " + (e && e.message)); }
+  }
+  if (playerMessages.has(player.guildId)) {
+    try { await playerMessages.get(player.guildId).edit({ content: "✅ **Queue beendet.**", embeds: [], components: [] }); } catch {}
+    playerMessages.delete(player.guildId);
+  }
+});
+
 // --------- WEB SERVER (Status, NP, Autoplay) ---------
 const app = express();
 app.use(cors());
@@ -138,7 +259,7 @@ app.get("/api/np", auth, async (req, res) => {
   if (!gid) return res.status(400).json({ error: "missing_guildId" });
   const p = client.lavalink.getPlayer(gid);
   if (!p || !p.queue.current) return res.json({ playing: false });
-  res.json({ playing: true, title: p.queue.current.info.title, author: p.queue.current.info.author, position: p.position, duration: p.queue.current.info.length, paused: p.paused });
+  res.json({ playing: true, title: p.queue.current.info.title, author: p.queue.current.info.author, position: p.position ?? 0, duration: p.queue.current.info.length, paused: p.paused });
 });
 
 app.get("/api/autoplay/:gid", auth, (req, res) => res.json({ list: ensureGuildSettings(req.params.gid).autoplaylist }));
@@ -149,11 +270,11 @@ app.get("*", (req, res) => res.sendFile(path.join(__dirname, "..", "public", "in
 app.listen(WEB_PORT, () => addLog(`Webinterface auf Port ${WEB_PORT}`));
 
 // --------- STARTUP: login, lavalink init, register message handlers ---------
-async function registerSlashCommandsForGuilds() {
+async function registerSlashCommandsGlobal() {
   try {
     const rest = new REST({ version: "10" }).setToken(DISCORD_TOKEN);
     await rest.put(Routes.applicationCommands(client.user.id), { body: commands });
-    addLog("[discord] Slash-Commands registriert (global/app).");
+    addLog("[discord] Slash-Commands registriert (global).");
   } catch (e) {
     addLog("[discord] Slash-Register Fehler: " + (e && e.message));
   }
@@ -168,27 +289,25 @@ client.once("ready", async () => {
     addLog("[lavalink] init fehlgeschlagen: " + (e && e.message));
   }
 
-  // Slash-Registration delegated to message.js if desired; we register here minimal metadata
-  try { await registerSlashCommandsForGuilds(); } catch (e) {}
+  // optional: register slash commands globally (message.js will also register if configured)
+  try { await registerSlashCommandsGlobal(); } catch (e) {}
 
-  // Jetzt: message.js registriert alle Commands/Interactions/Embeds
+  // Registriere message/interaction handler (komplette Logik in message.js)
   registerMessageHandlers({
     client,
     COMMAND_PREFIX,
+    DISCORD_TOKEN,
+    handlePlay,
+    handleSkip,
+    handleStop,
+    handleLeave,
     ensureGuildSettings,
     scheduleSaveGuildSettings,
-    // expose helper functions that message.js may need to call
-    getOrCreatePlayer,
-    applyGuildVolume,
-    // control handlers used by message.js
-    handlePlay: async (...args) => module.exports.handlePlay(...args), // placeholder, will be replaced below
-    handleSkip: async (...args) => module.exports.handleSkip(...args),
-    handleStop: async (...args) => module.exports.handleStop(...args),
-    handleLeave: async (...args) => module.exports.handleLeave(...args),
-    playerMessages: new Map()
+    setGuildVolume,
+    playerMessages
   });
 
-  addLog("[startup] Message handlers registriert (delegiert an message.js).");
+  addLog("[startup] Message handlers registriert (message.js).");
 });
 
 // Login
@@ -199,50 +318,13 @@ process.on("SIGTERM", async () => { addLog("SIGTERM empfangen"); try { await cli
 process.on("SIGINT", async () => { addLog("SIGINT empfangen"); try { await client.destroy(); } catch {} process.exit(0); });
 process.on("uncaughtException", err => { console.error("Uncaught Exception:", err); process.exit(1); });
 
-// --------- Export core handlers so message.js can call them (kept minimal) ---------
+// --------- Export core handlers (falls externe Module sie benötigen) ---------
 module.exports = {
-  // core control functions (message.js should call these via require if needed)
-  handlePlay: async function(guild, userMember, query, textChannelId = null) {
-    // resolveVoiceChannelId logic inline to keep index.js minimal
-    const resolveVoiceChannelId = async (guild, member) => {
-      try { if (member && member.voice && member.voice.channelId) return member.voice.channelId; } catch (e) {}
-      const s = ensureGuildSettings(guild.id);
-      if (s.voiceChannelId) return s.voiceChannelId;
-      const first = guild.channels.cache.find(c => c.type === 2 || c.type === 13);
-      if (first) return first.id;
-      return null;
-    };
-    const voiceChannelId = await resolveVoiceChannelId(guild, userMember);
-    if (!voiceChannelId) throw new Error("Kein Voice-Channel verfügbar. Bitte trete einem Voice-Channel bei oder setze einen Standard mit /setvoice.");
-    const player = await getOrCreatePlayer(guild, voiceChannelId, textChannelId);
-    const res = await player.search({ query }, userMember || client.user);
-    if (!res?.tracks?.length) throw new Error("Keine Treffer gefunden.");
-    await player.queue.add(res.tracks[0]);
-    await interruptAutoplayForUser(guild.id);
-    if (!player.playing) await player.play();
-    return res.tracks[0];
-  },
-
-  handleSkip: async function(guildId) {
-    const p = client.lavalink.getPlayer(guildId);
-    if (!p) throw new Error("Kein Player für diesen Server.");
-    if (!p.queue.current) throw new Error("Kein Track läuft.");
-    await p.skip();
-  },
-
-  handleStop: async function(guildId) {
-    const p = client.lavalink.getPlayer(guildId);
-    if (!p) throw new Error("Kein Player für diesen Server.");
-    await p.queue.clear();
-    await p.stop();
-  },
-
-  handleLeave: async function(guildId) {
-    const p = client.lavalink.getPlayer(guildId);
-    if (p) { await p.destroy(); client.lavalink.deletePlayer(guildId); }
-  },
-
+  handlePlay,
+  handleSkip,
+  handleStop,
+  handleLeave,
   ensureGuildSettings,
-  scheduleSaveGuildSettings
+  scheduleSaveGuildSettings,
+  setGuildVolume
 };
-
