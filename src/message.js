@@ -5,7 +5,7 @@ const { commands, handlers } = require("./commands");
 /**
  * registerMessageHandlers(ctx)
  * ctx must include:
- * { client, COMMAND_PREFIX, DISCORD_TOKEN, handlePlay, handleSkip, handleStop, handleLeave, ensureGuildSettings, scheduleSaveGuildSettings, setGuildVolume, playerMessages }
+ * { client, COMMAND_PREFIX, DISCORD_TOKEN, handlePlay, handleSkip, handleStop, handleLeave, ensureGuildSettings, scheduleSaveGuildSettings, setGuildVolume, playerMessages (Map) }
  */
 module.exports = function registerMessageHandlers(ctx = {}) {
   const {
@@ -32,11 +32,18 @@ module.exports = function registerMessageHandlers(ctx = {}) {
     return `${m}:${s.toString().padStart(2, "0")}`;
   }
 
+  function getPlayerPosition(player) {
+    // try common properties used by lavalink clients
+    return (player && (player.position ?? player.state?.position ?? 0)) || 0;
+  }
+
   function createNowPlayingEmbed(track, player, status = "Spielt gerade") {
     const slider = "▬".repeat(15).split("");
     try {
-      if (track.info.length > 0) {
-        const pct = Math.min(player.position / track.info.length, 1);
+      const length = Number(track.info.length || 0);
+      const pos = Number(getPlayerPosition(player) || 0);
+      if (length > 0) {
+        const pct = Math.min(pos / length, 1);
         const idx = Math.floor(pct * 15);
         if (idx >= 0 && idx < 15) slider[idx] = "🔘";
       }
@@ -46,8 +53,8 @@ module.exports = function registerMessageHandlers(ctx = {}) {
       .setTitle("🎶 " + status)
       .setDescription(`**[${track.info.title}](${track.info.uri})**\nby ${track.info.author}`)
       .addFields(
-        { name: "Zeit", value: `\`${formatMs(player.position)} / ${formatMs(track.info.length)}\``, inline: true },
-        { name: "Volume", value: `\`${player.volume}%\``, inline: true },
+        { name: "Zeit", value: `\`${formatMs(getPlayerPosition(player))} / ${formatMs(track.info.length)}\``, inline: true },
+        { name: "Volume", value: `\`${player.volume ?? "n/a"}%\``, inline: true },
         { name: "Fortschritt", value: slider.join(""), inline: false }
       )
       .setThumbnail(track.info.artworkUrl || null)
@@ -133,7 +140,6 @@ module.exports = function registerMessageHandlers(ctx = {}) {
         const name = interaction.commandName;
         const handler = handlers[name];
         if (typeof handler === "function") {
-          // build ctx for handlers
           const hctx = {
             client,
             handlePlay,
@@ -158,7 +164,7 @@ module.exports = function registerMessageHandlers(ctx = {}) {
     }
   });
 
-  // --- Prefix message handler ---
+  // --- Prefix message handler (inkl. ping) ---
   client.on("messageCreate", async (message) => {
     if (message.author.bot || !message.guild) return;
     if (!message.content.startsWith(COMMAND_PREFIX)) return;
@@ -168,6 +174,21 @@ module.exports = function registerMessageHandlers(ctx = {}) {
     if (!cmd) return;
 
     try {
+      // PING (prefix)
+      if (cmd === "ping") {
+        const start = Date.now();
+        const sent = await message.reply("Pong...");
+        const rtt = Date.now() - start;
+        const wsPing = client.ws?.ping ?? "n/a";
+        const mem = process.memoryUsage().rss;
+        const memMB = (mem / 1024 / 1024).toFixed(2);
+        const lavalinkNodes = client.lavalink?.nodes || new Map();
+        const lavalinkStatus = lavalinkNodes.size ? Array.from(lavalinkNodes.values()).map(n => `${n.id}:${n.connected ? "ok" : "down"}`).join(", ") : "no-nodes";
+        try { await sent.edit(`Pong — RTT ${rtt}ms; WS ${wsPing}ms; Lavalink: ${lavalinkStatus}; RAM ${memMB} MB`); } catch {}
+        return;
+      }
+
+      // PLAY
       if (cmd === "play" || cmd === "p") {
         const query = args.join(" ");
         if (!query) return message.reply("Bitte gib einen Suchbegriff oder Link an.");
@@ -175,6 +196,7 @@ module.exports = function registerMessageHandlers(ctx = {}) {
         return message.reply(`▶️ **${track.info.title}** wurde zur Queue hinzugefügt.`);
       }
 
+      // NP
       if (cmd === "np") {
         const p = client.lavalink.getPlayer(message.guild.id);
         if (!p || !p.queue.current) return message.reply("Stille.");
@@ -184,10 +206,16 @@ module.exports = function registerMessageHandlers(ctx = {}) {
         return;
       }
 
+      // SKIP
       if (cmd === "skip") { await handleSkip(message.guild.id); return message.reply("⏭️ Übersprungen."); }
+
+      // STOP
       if (cmd === "stop") { await handleStop(message.guild.id); return message.reply("⏹️ Gestoppt."); }
+
+      // LEAVE
       if (cmd === "leave") { await handleLeave(message.guild.id); return message.reply("👋 Voice verlassen."); }
 
+      // SETVOICE
       if (cmd === "setvoice") {
         const vc = message.member.voice.channel;
         if (!vc) return message.reply("Bitte gehe zuerst in einen Voice-Channel oder nutze /setvoice <channel>.");
@@ -195,11 +223,13 @@ module.exports = function registerMessageHandlers(ctx = {}) {
         return message.reply(`🎧 Voice-Channel gesetzt auf **${vc.name}**.`);
       }
 
+      // SETTEXT
       if (cmd === "settext") {
         const s = ensureGuildSettings(message.guild.id); s.textChannelId = message.channel.id; scheduleSaveGuildSettings();
         return message.reply(`💬 Steuer-Textkanal gesetzt auf **${message.channel.name}**.`);
       }
 
+      // ABOUT
       if (cmd === "about") {
         return message.reply(
           "🎵 Nightwolf Entertainments Musikbot – mit Webinterface und Lavalink.\n" +
@@ -208,6 +238,7 @@ module.exports = function registerMessageHandlers(ctx = {}) {
         );
       }
 
+      // HELP
       if (cmd === "help" || cmd === "h") {
         const embed = createHelpEmbed(COMMAND_PREFIX);
         return message.reply({ embeds: [embed] });
@@ -218,6 +249,29 @@ module.exports = function registerMessageHandlers(ctx = {}) {
     }
   });
 
+  // --- NowPlaying update loop (refresh active embeds every 5s) ---
+  setInterval(async () => {
+    for (const [guildId, msg] of playerMessages.entries()) {
+      try {
+        const player = client.lavalink.getPlayer(guildId);
+        if (!player || !player.queue.current) {
+          // cleanup if no player or queue
+          try { await msg.edit({ content: "✅ **Queue beendet.**", embeds: [], components: [] }); } catch {}
+          playerMessages.delete(guildId);
+          continue;
+        }
+        const embed = createNowPlayingEmbed(player.queue.current, player, player.paused ? "Pausiert" : "Spielt gerade");
+        await msg.edit({ embeds: [embed], components: [createButtons(player.paused)] }).catch(err => {
+          // message deleted or cannot edit
+          if (err && err.code === 10008) playerMessages.delete(guildId);
+        });
+      } catch (e) {
+        // ignore per-guild errors
+        if (e && e.code === 10008) playerMessages.delete(guildId);
+      }
+    }
+  }, 5000);
+
   // --- register slash commands when client is ready ---
   client.once("ready", async () => {
     try { await registerSlashCommands(); } catch (e) { console.error("Slash-Register failed:", e); }
@@ -226,4 +280,3 @@ module.exports = function registerMessageHandlers(ctx = {}) {
   // --- return UI factories for index.js if needed ---
   return { createNowPlayingEmbed, createButtons, createHelpEmbed };
 };
-
