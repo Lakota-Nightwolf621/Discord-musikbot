@@ -38,7 +38,10 @@ const commands = [
     .addSubcommand(sc => sc.setName("list").setDescription("Autoplayliste anzeigen"))
     .addSubcommand(sc => sc.setName("clear").setDescription("Autoplayliste leeren")),
 
-  new SlashCommandBuilder().setName("help").setDescription("Zeigt die Hilfeübersicht.")
+  new SlashCommandBuilder().setName("help").setDescription("Zeigt die Hilfeübersicht."),
+
+  // Ping command
+  new SlashCommandBuilder().setName("ping").setDescription("Zeigt Latenz, Prozess- und Lavalink-Status.")
 ].map(c => c.toJSON());
 
 /**
@@ -61,7 +64,6 @@ const handlers = {
   np: async (interaction, ctx) => {
     const p = ctx.client.lavalink.getPlayer(interaction.guildId);
     if (!p || !p.queue.current) return interaction.reply("Stille.");
-    // message.js erzeugt das Embed; hier eine kurze textuelle Antwort als Fallback
     const now = p.queue.current;
     return interaction.reply({ content: `Now Playing: **${now.info.title}** — ${now.info.author}` });
   },
@@ -158,8 +160,29 @@ const handlers = {
   },
 
   help: async (interaction, ctx) => {
-    // message.js erzeugt das Embed; hier nur ein kurzer Hinweis
     await interaction.reply({ content: "Nutze das Webinterface oder !help für Details.", ephemeral: true });
+  },
+
+  // Ping handler
+  ping: async (interaction, ctx) => {
+    await interaction.deferReply();
+    try {
+      const start = Date.now();
+      // Discord WS ping
+      const wsPing = ctx.client.ws?.ping ?? null;
+      // Lavalink status
+      const lavalinkNodes = ctx.client.lavalink?.nodes || new Map();
+      const lavalinkStatus = lavalinkNodes.size ? Array.from(lavalinkNodes.values()).map(n => `${n.id}:${n.connected ? "ok" : "down"}`).join(", ") : "no-nodes";
+      // process stats
+      const mem = process.memoryUsage().rss;
+      const memMB = (mem / 1024 / 1024).toFixed(2);
+      const uptimeH = (process.uptime() / 3600).toFixed(2);
+
+      const latency = Date.now() - start;
+      await interaction.editReply(`Pong — RTT ${latency}ms; WS ${wsPing ?? "n/a"}ms; Lavalink: ${lavalinkStatus}; RAM ${memMB} MB; Uptime ${uptimeH} h`);
+    } catch (e) {
+      await interaction.editReply("Fehler beim Ping: " + (e && e.message));
+    }
   }
 };
 
