@@ -1,12 +1,11 @@
 // message.js
-const { REST, Routes, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
-const { commands, handlers } = require("./commands");
+// Registriert Slash-Commands, Interaction-Handler (Buttons + Slash) und Prefix-Commands.
+// Erwartet beim Aufruf ein ctx-Objekt mit: client, COMMAND_PREFIX, DISCORD_TOKEN, handlePlay, handleSkip, handleStop, handleLeave, ensureGuildSettings, scheduleSaveGuildSettings, setGuildVolume, playerMessages (Map)
 
-/**
- * registerMessageHandlers(ctx)
- * ctx must include:
- * { client, COMMAND_PREFIX, DISCORD_TOKEN, handlePlay, handleSkip, handleStop, handleLeave, ensureGuildSettings, scheduleSaveGuildSettings, setGuildVolume, playerMessages (Map) }
- */
+const { REST, Routes, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require("discord.js");
+const os = require("os");
+const { commands, handlers: commandHandlers } = require("./commands");
+
 module.exports = function registerMessageHandlers(ctx = {}) {
   const {
     client,
@@ -26,38 +25,39 @@ module.exports = function registerMessageHandlers(ctx = {}) {
 
   // --- UI helpers ---
   function formatMs(ms) {
-    if (!ms) return "0:00";
+    if (!ms || Number(ms) <= 0) return "0:00";
     const s = Math.floor(ms / 1000) % 60;
     const m = Math.floor(ms / 1000 / 60);
     return `${m}:${s.toString().padStart(2, "0")}`;
   }
 
   function getPlayerPosition(player) {
-    // try common properties used by lavalink clients
-    return (player && (player.position ?? player.state?.position ?? 0)) || 0;
+    try {
+      return Number(player?.position ?? player?.state?.position ?? player?.state?.playbackDuration ?? 0) || 0;
+    } catch {
+      return 0;
+    }
   }
 
   function createNowPlayingEmbed(track, player, status = "Spielt gerade") {
     const slider = "▬".repeat(15).split("");
-    try {
-      const length = Number(track.info.length || 0);
-      const pos = Number(getPlayerPosition(player) || 0);
-      if (length > 0) {
-        const pct = Math.min(pos / length, 1);
-        const idx = Math.floor(pct * 15);
-        if (idx >= 0 && idx < 15) slider[idx] = "🔘";
-      }
-    } catch (e) {}
+    const length = Number(track?.info?.length ?? track?.info?.duration ?? 0);
+    const pos = Number(getPlayerPosition(player) || 0);
+    if (length > 0) {
+      const pct = Math.min(pos / length, 1);
+      const idx = Math.floor(pct * 15);
+      if (idx >= 0 && idx < 15) slider[idx] = "🔘";
+    }
     return new EmbedBuilder()
       .setColor(0xff0033)
       .setTitle("🎶 " + status)
-      .setDescription(`**[${track.info.title}](${track.info.uri})**\nby ${track.info.author}`)
+      .setDescription(`**[${track?.info?.title || "Unbekannt"}](${track?.info?.uri || ""})**\nby ${track?.info?.author || "?"}`)
       .addFields(
-        { name: "Zeit", value: `\`${formatMs(getPlayerPosition(player))} / ${formatMs(track.info.length)}\``, inline: true },
-        { name: "Volume", value: `\`${player.volume ?? "n/a"}%\``, inline: true },
+        { name: "Zeit", value: `\`${formatMs(pos)} / ${formatMs(length)}\``, inline: true },
+        { name: "Volume", value: `\`${player?.volume ?? "n/a"}%\``, inline: true },
         { name: "Fortschritt", value: slider.join(""), inline: false }
       )
-      .setThumbnail(track.info.artworkUrl || null)
+      .setThumbnail(track?.info?.artworkUrl || null)
       .setFooter({ text: "Nightwolf Entertainments", iconURL: client.user?.displayAvatarURL() });
   }
 
@@ -75,8 +75,8 @@ module.exports = function registerMessageHandlers(ctx = {}) {
       .setTitle("🎵 Musikbot – Hilfe")
       .setDescription("Übersicht über die wichtigsten Befehle.")
       .addFields(
-        { name: "Slash", value: "`/play <query>`, `/np`, `/skip`, `/stop`, `/leave`, `/setvoice`, `/settext`, `/volume`, `/autoplay`" },
-        { name: "Prefix", value: `\`${prefix}play\`, \`${prefix}np\`, \`${prefix}skip\`, \`${prefix}stop\`, \`${prefix}help\`` }
+        { name: "Slash", value: "`/play <query>`, `/np`, `/skip`, `/stop`, `/leave`, `/setvoice`, `/settext`, `/volume`, `/autoplay`, `/about`" },
+        { name: "Prefix", value: `\`${prefix}play\`, \`${prefix}np\`, \`${prefix}skip\`, \`${prefix}stop\`, \`${prefix}help\`, \`${prefix}about\`` }
       )
       .setColor(0x5865f2);
   }
@@ -111,9 +111,30 @@ module.exports = function registerMessageHandlers(ctx = {}) {
 
         switch (interaction.customId) {
           case "pause": {
-            const newState = !player.paused;
-            await player.pause(newState);
-            await interaction.update({ components: [createButtons(newState)] });
+            try {
+              if (player.paused) {
+                // currently paused -> unpause
+                if (typeof player.pause === "function") {
+                  await player.pause(false);
+                  await interaction.update({ components: [createButtons(false)] });
+                } else if (typeof player.play === "function") {
+                  await player.play();
+                  await interaction.update({ components: [createButtons(false)] });
+                } else {
+                  await interaction.reply({ content: "Unpause nicht unterstützt.", ephemeral: true });
+                }
+              } else {
+                // currently playing -> pause
+                if (typeof player.pause === "function") {
+                  await player.pause(true);
+                  await interaction.update({ components: [createButtons(true)] });
+                } else {
+                  await interaction.reply({ content: "Pause nicht unterstützt.", ephemeral: true });
+                }
+              }
+            } catch (e) {
+              await interaction.reply({ content: "Fehler: " + (e?.message || e), ephemeral: true });
+            }
             break;
           }
           case "skip": {
@@ -135,11 +156,12 @@ module.exports = function registerMessageHandlers(ctx = {}) {
         return;
       }
 
-      // Slash commands: dispatch to handlers from commands.js
+      // Slash commands
       if (interaction.isChatInputCommand && interaction.isChatInputCommand()) {
         const name = interaction.commandName;
-        const handler = handlers[name];
-        if (typeof handler === "function") {
+
+        // Delegate to commandHandlers if available (commands.js handlers are minimal)
+        if (commandHandlers && typeof commandHandlers[name] === "function") {
           const hctx = {
             client,
             handlePlay,
@@ -150,10 +172,56 @@ module.exports = function registerMessageHandlers(ctx = {}) {
             scheduleSaveGuildSettings,
             setGuildVolume
           };
-          await handler(interaction, hctx);
-        } else {
-          await interaction.reply({ content: "Unbekannter Befehl", ephemeral: true });
+          return await commandHandlers[name](interaction, hctx);
         }
+
+        // Fallbacks for built-in commands if not handled above
+        if (name === "play") {
+          await interaction.deferReply();
+          const query = interaction.options.getString("query");
+          try {
+            const track = await handlePlay(interaction.guild, interaction.member, query, interaction.channelId);
+            await interaction.editReply(`✅ **${track.info.title}** wurde zur Queue hinzugefügt.`);
+          } catch (e) {
+            await interaction.editReply("Fehler: " + (e && e.message));
+          }
+          return;
+        }
+
+        if (name === "np") {
+          const p = client.lavalink.getPlayer(interaction.guildId);
+          if (!p || !p.queue.current) return interaction.reply("Stille.");
+          const embed = createNowPlayingEmbed(p.queue.current, p, p.paused ? "Pausiert" : "Spielt gerade");
+          const msg = await interaction.reply({ embeds: [embed], components: [createButtons(p.paused)], fetchReply: true });
+          playerMessages.set(interaction.guildId, msg);
+          return;
+        }
+
+        if (name === "about") {
+          try {
+            const mem = process.memoryUsage().rss;
+            const memMB = (mem / 1024 / 1024).toFixed(2);
+            const cpu = (os.loadavg && os.loadavg()[0]) ? os.loadavg()[0].toFixed(2) : "n/a";
+            const uptimeH = (process.uptime() / 3600).toFixed(2);
+            const embed = new EmbedBuilder()
+              .setTitle("ℹ️ About")
+              .setDescription("Nightwolf Entertainments Musikbot Lavalink")
+              .addFields(
+                { name: "Prefix", value: `\`${COMMAND_PREFIX}\``, inline: true },
+                { name: "RAM (RSS)", value: `\`${memMB} MB\``, inline: true },
+                { name: "CPU Load (1m)", value: `\`${cpu}\``, inline: true },
+                { name: "Hoster", value: `\`https://lakotanightwolf.de\``, inline: true },
+              )
+              .setColor(0x5865f2)
+              .setFooter({ text: "Nightwolf Entertainments", iconURL: client.user?.displayAvatarURL() });
+            await interaction.reply({ embeds: [embed], ephemeral: false });
+          } catch (e) {
+            await interaction.reply({ content: "Fehler beim Abrufen der Systemdaten: " + (e && e.message), ephemeral: true });
+          }
+          return;
+        }
+
+        // other commands handled earlier
       }
     } catch (err) {
       console.error("interaction handler error:", err);
@@ -164,7 +232,7 @@ module.exports = function registerMessageHandlers(ctx = {}) {
     }
   });
 
-  // --- Prefix message handler (inkl. ping) ---
+  // --- Prefix message handler ---
   client.on("messageCreate", async (message) => {
     if (message.author.bot || !message.guild) return;
     if (!message.content.startsWith(COMMAND_PREFIX)) return;
@@ -231,11 +299,26 @@ module.exports = function registerMessageHandlers(ctx = {}) {
 
       // ABOUT
       if (cmd === "about") {
-        return message.reply(
-          "🎵 Nightwolf Entertainments Musikbot – mit Webinterface und Lavalink.\n" +
-          `Prefix: \`${COMMAND_PREFIX}\`\n` +
-          "Nutze /play oder !play, um Songs abzuspielen."
-        );
+        try {
+          const mem = process.memoryUsage().rss;
+          const memMB = (mem / 1024 / 1024).toFixed(2);
+          const cpu = (os.loadavg && os.loadavg()[0]) ? os.loadavg()[0].toFixed(2) : "n/a";
+          const uptimeH = (process.uptime() / 3600).toFixed(2);
+          const embed = new EmbedBuilder()
+            .setTitle("ℹ️ About")
+            .setDescription("Nightwolf Entertainments Musikbot — Webinterface & Lavalink")
+            .addFields(
+              { name: "Prefix", value: `\`${COMMAND_PREFIX}\``, inline: true },
+              { name: "RAM (RSS)", value: `\`${memMB} MB\``, inline: true },
+              { name: "CPU Load (1m)", value: `\`${cpu}\``, inline: true },
+              { name: "Uptime", value: `\`${uptimeH} h\``, inline: true }
+            )
+            .setColor(0x5865f2)
+            .setFooter({ text: "Nightwolf Entertainments", iconURL: client.user?.displayAvatarURL() });
+          return message.reply({ embeds: [embed] });
+        } catch (e) {
+          return message.reply("Fehler beim Abrufen der Systemdaten: " + (e && e.message));
+        }
       }
 
       // HELP
@@ -255,18 +338,15 @@ module.exports = function registerMessageHandlers(ctx = {}) {
       try {
         const player = client.lavalink.getPlayer(guildId);
         if (!player || !player.queue.current) {
-          // cleanup if no player or queue
           try { await msg.edit({ content: "✅ **Queue beendet.**", embeds: [], components: [] }); } catch {}
           playerMessages.delete(guildId);
           continue;
         }
         const embed = createNowPlayingEmbed(player.queue.current, player, player.paused ? "Pausiert" : "Spielt gerade");
         await msg.edit({ embeds: [embed], components: [createButtons(player.paused)] }).catch(err => {
-          // message deleted or cannot edit
           if (err && err.code === 10008) playerMessages.delete(guildId);
         });
       } catch (e) {
-        // ignore per-guild errors
         if (e && e.code === 10008) playerMessages.delete(guildId);
       }
     }
