@@ -254,21 +254,27 @@ app.get("/api/status", auth, async (req, res) => {
 });
 
 app.get("/api/np", auth, async (req, res) => {
-  const gid = req.query.guildId;
-  if (!gid) return res.status(400).json({ error: "missing_guildId" });
-  const p = client.lavalink.getPlayer(gid);
-  if (!p || !p.queue.current) return res.json({ playing: false });
-  const pos = Number(p.position ?? p.state?.position ?? p.state?.playbackDuration ?? 0) || 0;
-  const dur = Number(p.queue.current.info?.length ?? p.queue.current.info?.duration ?? 0) || 0;
-  res.json({
-    playing: true,
-    title: p.queue.current.info?.title ?? null,
-    author: p.queue.current.info?.author ?? null,
-    position: pos,
-    duration: dur,
-    paused: !!p.paused
-  });
+  try {
+    const gid = req.query.guildId;
+    if (!gid) return res.status(400).json({ error: "missing_guildId" });
+    const p = client.lavalink.getPlayer(gid);
+    if (!p || !p.queue.current) return res.json({ playing: false });
+    const pos = Number(p.position ?? p.state?.position ?? p.state?.playbackDuration ?? 0) || 0;
+    const dur = Number(p.queue.current.info?.length ?? p.queue.current.info?.duration ?? 0) || 0;
+    res.json({
+      playing: true,
+      title: p.queue.current.info?.title ?? null,
+      author: p.queue.current.info?.author ?? null,
+      position: pos,
+      duration: dur,
+      paused: !!p.paused
+    });
+  } catch (e) {
+    addLog("[api/np] error: " + (e && e.message));
+    res.status(500).json({ error: e.message || "unknown" });
+  }
 });
+
 
 // Autoplay endpoints
 app.get("/api/autoplay/:gid", auth, (req, res) => res.json({ list: ensureGuildSettings(req.params.gid).autoplaylist }));
