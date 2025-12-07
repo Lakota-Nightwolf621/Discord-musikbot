@@ -2,9 +2,10 @@
 const { SlashCommandBuilder, ChannelType } = require("discord.js");
 
 /**
- * Build an array of SlashCommandBuilder objects.
- * Ensure every builder has a valid description string before calling toJSON().
+ * Erzeuge die Builder-Liste wie gewohnt.
+ * Wenn toJSON() fehlschlägt, versuchen wir, eine Default-Description zu setzen und erneut.
  */
+
 const builders = [
   new SlashCommandBuilder()
     .setName("play")
@@ -59,18 +60,28 @@ const builders = [
     .setDescription("Zeigt Latenz, Prozess- und Lavalink-Status.")
 ];
 
-// Validate and ensure descriptions are strings, then export JSON
-for (const b of builders) {
+/**
+ * Safe toJSON: versucht toJSON(), fängt ValidationError und setzt notfalls eine Default-Description.
+ * Liefert ein Array von JSON-Objekten für die Registrierung.
+ */
+const commands = builders.map((b, idx) => {
   try {
-    const desc = b.description;
-    if (typeof desc !== "string" || desc.trim() === "") {
-      b.setDescription("No description provided.");
+    return b.toJSON();
+  } catch (err) {
+    // Falls toJSON fehlschlägt, versuchen wir, eine Default-Description zu setzen und erneut
+    try {
+      if (typeof b.setDescription === "function") {
+        b.setDescription("No description provided.");
+        return b.toJSON();
+      }
+    } catch (inner) {
+      // Falls auch das fehlschlägt, werfen wir einen aussagekräftigeren Fehler
+      const name = (b && b.name) || `builder_index_${idx}`;
+      throw new Error(`commands.js: Failed to serialize command ${name} (index ${idx}): ${inner?.message || inner || err?.message || err}`);
     }
-  } catch (e) {
-    try { b.setDescription("No description provided."); } catch {}
+    // Wenn wir hier landen, rethrow original error
+    throw err;
   }
-}
-
-const commands = builders.map(b => b.toJSON());
+});
 
 module.exports = { commands };
